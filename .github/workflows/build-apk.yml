@@ -7,6 +7,9 @@ on:
     branches: [ main, master ]
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     name: Build Debug APK
@@ -49,13 +52,27 @@ jobs:
             echo "Error: APK file was not found!"
             exit 1
           fi
+          # Single clean copy to keep artifact download size small (~46MB instead of 92MB)
           cp "$APK_FILE" release-apks/TravelTrack-debug.apk
-          cp "$APK_FILE" release-apks/app-debug.apk
-          ls -la release-apks/
+          ls -lh release-apks/
 
       - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
           name: TravelTrack-debug-apk
-          path: release-apks/*.apk
+          path: release-apks/TravelTrack-debug.apk
           retention-days: 30
+
+      - name: Publish to GitHub Releases (Allows direct download without signing in)
+        if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+        continue-on-error: true
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: latest
+          name: "TravelTrack Latest Build"
+          body: "Automated build of TravelTrack debug APK from the latest commit."
+          files: release-apks/TravelTrack-debug.apk
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

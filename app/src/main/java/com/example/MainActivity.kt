@@ -1,18 +1,25 @@
 package com.example
 
+import android.Manifest
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import androidx.activity.ComponentActivity
+import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.activity.viewModels
 import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.tween
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontWeight
 import androidx.core.content.IntentCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.example.ui.ScreenDestination
@@ -22,6 +29,9 @@ import com.example.ui.screens.HomeScreen
 import com.example.ui.screens.ReviewTicketScreen
 import com.example.ui.screens.SettingsScreen
 import com.example.ui.screens.TripDetailScreen
+import com.example.ui.theme.DotoFontFamily
+import com.example.ui.theme.NothingRed
+import com.example.ui.theme.SpaceGroteskFontFamily
 import com.example.ui.theme.TravelTrackTheme
 
 class MainActivity : ComponentActivity() {
@@ -42,6 +52,57 @@ class MainActivity : ComponentActivity() {
         setContent {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
+
+            val smsPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestMultiplePermissions()
+            ) {
+                viewModel.showSmsRationale(false)
+            }
+
+            if (uiState.showSmsPermissionRationale) {
+                AlertDialog(
+                    onDismissRequest = { viewModel.showSmsRationale(false) },
+                    title = {
+                        Text(
+                            text = "SMS PERMISSION // 139 PNR STATUS",
+                            fontFamily = DotoFontFamily,
+                            fontWeight = FontWeight.Bold
+                        )
+                    },
+                    text = {
+                        Text(
+                            text = "TravelTrack uses SMS exclusively to send 'PNR <10-digit PNR>' to 139 and automatically detect the reply on your device. Messages from any other phone numbers are completely ignored and no data leaves your phone.",
+                            fontFamily = SpaceGroteskFontFamily
+                        )
+                    },
+                    confirmButton = {
+                        TextButton(
+                            onClick = {
+                                viewModel.showSmsRationale(false)
+                                smsPermissionLauncher.launch(
+                                    arrayOf(
+                                        Manifest.permission.SEND_SMS,
+                                        Manifest.permission.RECEIVE_SMS,
+                                        Manifest.permission.READ_SMS
+                                    )
+                                )
+                            }
+                        ) {
+                            Text(
+                                text = "CONTINUE",
+                                fontFamily = DotoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                color = NothingRed
+                            )
+                        }
+                    },
+                    dismissButton = {
+                        TextButton(onClick = { viewModel.showSmsRationale(false) }) {
+                            Text(text = "CANCEL", fontFamily = DotoFontFamily)
+                        }
+                    }
+                )
+            }
 
             TravelTrackTheme(darkTheme = uiState.settings.darkTheme) {
                 TravelTrackAppContent(
@@ -147,11 +208,19 @@ fun TravelTrackAppContent(
 
             is ScreenDestination.TripDetail -> {
                 val trip = uiState.allTrips.find { it.id == destination.tripId }
+                val isPending = uiState.pendingPnrTripId == destination.tripId && uiState.pendingPnrSecondsRemaining > 0
+                val secondsLeft = if (uiState.pendingPnrTripId == destination.tripId) uiState.pendingPnrSecondsRemaining else 0
                 TripDetailScreen(
                     trip = trip,
+                    pendingPnrSecondsRemaining = secondsLeft,
+                    isPnrCheckPending = isPending,
+                    showCheckForConfirmed = uiState.settings.showCheckForConfirmed,
                     onBack = { viewModel.navigateBack() },
                     onEditTrip = { viewModel.openEditTrip(it) },
-                    onDeleteTrip = { viewModel.deleteTrip(it) }
+                    onDeleteTrip = { viewModel.deleteTrip(it) },
+                    onCheckPnrStatus = { viewModel.checkPnrStatusViaSms(it) },
+                    onCancelPendingCheck = { viewModel.cancelPendingPnrCheck() },
+                    onUpdateStatusManually = { tripId, status -> viewModel.updateStatusManually(tripId, status) }
                 )
             }
 
@@ -164,6 +233,10 @@ fun TravelTrackAppContent(
                     onToggleDayBefore = { viewModel.setNotifyDayBefore(it) },
                     onToggleTwoHoursBefore = { viewModel.setNotifyTwoHoursBefore(it) },
                     onToggleDarkTheme = { viewModel.setDarkTheme(it) },
+                    onToggleAutoCheckPnr = { viewModel.setAutoCheckPnr(it) },
+                    onToggleCheckInFinal24Hours = { viewModel.setCheckInFinal24Hours(it) },
+                    onToggleShowCheckConfirmed = { viewModel.setShowCheckForConfirmed(it) },
+                    onClearPnrHistory = { viewModel.clearPnrCheckHistory() },
                     onRefreshWidgetNow = { viewModel.forceRefreshWidgetsNow() },
                     onDeleteAllData = { viewModel.deleteAllData() }
                 )

@@ -26,6 +26,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.PnrStatusCategory
 import com.example.data.Trip
 import com.example.data.TripType
 import com.example.ui.theme.DotoFontFamily
@@ -49,8 +50,21 @@ fun NothingWidgetPreviewCard(
     val nothingRed = Color(0xFFD71921)
     val textWhite = Color(0xFFFFFFFF)
     val textMuted = Color(0xFF9E9E9E)
+
+    // 6. Dot color: green for CONFIRMED, amber for RAC or WAITLISTED, red for CANCELLED, grey for UNKNOWN
     val statusGreen = Color(0xFF00E676)
     val statusAmber = Color(0xFFFFB300)
+    val statusRed = Color(0xFFD71921)
+    val statusGrey = Color(0xFF8E8E8E)
+
+    fun resolveDotColor(trip: Trip): Color {
+        return when (trip.statusCategory) {
+            PnrStatusCategory.CONFIRMED -> statusGreen
+            PnrStatusCategory.RAC, PnrStatusCategory.WAITLISTED -> statusAmber
+            PnrStatusCategory.CANCELLED -> statusRed
+            PnrStatusCategory.UNKNOWN, PnrStatusCategory.CHART_PREPARED -> statusGrey
+        }
+    }
 
     Column(
         modifier = modifier
@@ -114,7 +128,7 @@ fun NothingWidgetPreviewCard(
             }
         } else if (isCompact2x2) {
             val trip = trips.first()
-            val dotColor = if (trip.isWaitlisted()) statusAmber else statusGreen
+            val dotColor = resolveDotColor(trip)
             Column(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -136,15 +150,16 @@ fun NothingWidgetPreviewCard(
                     )
                     Spacer(modifier = Modifier.width(6.dp))
                     Text(
-                        text = trip.type.name,
+                        text = "${trip.type.name} · ${trip.effectiveStatus}",
                         color = textMuted,
                         fontFamily = DotoFontFamily,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
-                        modifier = Modifier.weight(1f)
+                        modifier = Modifier.weight(1f),
+                        maxLines = 1
                     )
                     Text(
-                        text = "••${trip.maskedReferenceLast4()}",
+                        text = "#${trip.maskedReferenceLast4()}",
                         color = textMuted,
                         fontFamily = DotoFontFamily,
                         fontSize = 10.sp
@@ -166,6 +181,12 @@ fun NothingWidgetPreviewCard(
                     color = textMuted,
                     fontFamily = DotoFontFamily,
                     fontSize = 11.sp
+                )
+                Text(
+                    text = trip.formattedLastChecked(),
+                    color = textMuted,
+                    fontFamily = DotoFontFamily,
+                    fontSize = 9.sp
                 )
                 Spacer(modifier = Modifier.height(6.dp))
                 Row(
@@ -194,7 +215,7 @@ fun NothingWidgetPreviewCard(
         } else {
             Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 trips.take(3).forEach { trip ->
-                    val dotColor = if (trip.isWaitlisted()) statusAmber else statusGreen
+                    val dotColor = resolveDotColor(trip)
                     Row(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -237,6 +258,12 @@ fun NothingWidgetPreviewCard(
                                 fontFamily = DotoFontFamily,
                                 fontSize = 11.sp
                             )
+                            Text(
+                                text = "${trip.effectiveStatus} · ${trip.formattedLastChecked()}",
+                                color = textMuted,
+                                fontFamily = DotoFontFamily,
+                                fontSize = 9.sp
+                            )
                         }
                         Spacer(modifier = Modifier.width(8.dp))
                         Column(horizontalAlignment = Alignment.End) {
@@ -276,7 +303,9 @@ private val PreviewSampleTrips = listOf(
         arrivalDateTime = "2026-11-10T10:50",
         amount = 20180L,
         reference = "6952208777",
-        status = "RLWL/28",
+        status = "RLWL/29",
+        currentStatus = "RLWL/28",
+        lastCheckedAt = "2026-11-06T06:30",
         passengerNames = "SAI CHAND NOMULA"
     ),
     Trip(

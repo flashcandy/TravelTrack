@@ -32,7 +32,7 @@ class ExampleRobolectricTest {
         database = Room.inMemoryDatabaseBuilder(context, AppDatabase::class.java)
             .allowMainThreadQueries()
             .build()
-        repository = TripRepository(database.tripDao())
+        repository = TripRepository(database.tripDao(), database.pnrStatusCheckDao())
     }
 
     @After

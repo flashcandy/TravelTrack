@@ -40,6 +40,7 @@ import androidx.glance.unit.ColorProvider
 import com.example.MainActivity
 import com.example.R
 import com.example.data.AppDatabase
+import com.example.data.PnrStatusCategory
 import com.example.data.SettingsRepository
 import com.example.data.Trip
 import com.example.data.TripFilter
@@ -57,8 +58,21 @@ class TravelTrackWidget : GlanceAppWidget() {
         private val NothingRed = ColorProvider(Color(0xFFD71921))
         private val TextWhite = ColorProvider(Color(0xFFFFFFFF))
         private val TextMuted = ColorProvider(Color(0xFF9E9E9E))
-        private val StatusConfirmedGreen = ColorProvider(Color(0xFF00E676))
-        private val StatusWaitlistAmber = ColorProvider(Color(0xFFFFB300))
+
+        // 6. Dot color: green for CONFIRMED, amber for RAC or WAITLISTED, red for CANCELLED, grey for UNKNOWN
+        val StatusConfirmedGreen = ColorProvider(Color(0xFF00E676))
+        val StatusWaitlistAmber = ColorProvider(Color(0xFFFFB300))
+        val StatusCancelledRed = ColorProvider(Color(0xFFD71921))
+        val StatusUnknownGrey = ColorProvider(Color(0xFF8E8E8E))
+
+        fun getWidgetDotColor(trip: Trip): ColorProvider {
+            return when (trip.statusCategory) {
+                PnrStatusCategory.CONFIRMED -> StatusConfirmedGreen
+                PnrStatusCategory.RAC, PnrStatusCategory.WAITLISTED -> StatusWaitlistAmber
+                PnrStatusCategory.CANCELLED -> StatusCancelledRed
+                PnrStatusCategory.UNKNOWN, PnrStatusCategory.CHART_PREPARED -> StatusUnknownGrey
+            }
+        }
     }
 
     override val sizeMode: SizeMode = SizeMode.Responsive(
@@ -160,11 +174,11 @@ class TravelTrackWidget : GlanceAppWidget() {
                     )
                 }
             } else if (isCompact) {
-                // 2x2 Compact mode: show soonest upcoming trip (or 2 compact rows)
+                // 2x2 Compact mode
                 val primaryTrip = trips.first()
                 CompactWidgetTripCard(context = context, trip = primaryTrip, extraCount = trips.size - 1)
             } else {
-                // 4x2 List mode: show up to 3 upcoming trips
+                // 4x2 List mode
                 Column(modifier = GlanceModifier.fillMaxSize()) {
                     trips.take(3).forEachIndexed { idx, trip ->
                         WidgetTripRow(context = context, trip = trip)
@@ -184,7 +198,7 @@ class TravelTrackWidget : GlanceAppWidget() {
         extraCount: Int
     ) {
         val detailIntent = createTripDetailIntent(context, trip.id)
-        val dotColor = if (trip.isWaitlisted()) StatusWaitlistAmber else StatusConfirmedGreen
+        val dotColor = getWidgetDotColor(trip)
 
         Column(
             modifier = GlanceModifier
@@ -206,14 +220,15 @@ class TravelTrackWidget : GlanceAppWidget() {
                 ) {}
                 Spacer(modifier = GlanceModifier.width(6.dp))
                 Text(
-                    text = trip.type.name,
+                    text = "${trip.type.name} · ${trip.effectiveStatus}",
                     style = TextStyle(
                         color = TextMuted,
                         fontSize = 10.sp,
                         fontWeight = FontWeight.Bold,
                         fontFamily = FontFamily.Monospace
                     ),
-                    modifier = GlanceModifier.defaultWeight()
+                    modifier = GlanceModifier.defaultWeight(),
+                    maxLines = 1
                 )
                 Text(
                     text = "#${trip.maskedReferenceLast4()}",
@@ -237,13 +252,24 @@ class TravelTrackWidget : GlanceAppWidget() {
                 maxLines = 1
             )
 
-            Spacer(modifier = GlanceModifier.height(4.dp))
+            Spacer(modifier = GlanceModifier.height(2.dp))
 
             Text(
                 text = "${trip.departureDate} ${trip.departureTime}",
                 style = TextStyle(
                     color = TextMuted,
-                    fontSize = 11.sp,
+                    fontSize = 10.sp,
+                    fontFamily = FontFamily.Monospace
+                ),
+                maxLines = 1
+            )
+
+            // 6. Show last checked time under trip row
+            Text(
+                text = trip.formattedLastChecked(),
+                style = TextStyle(
+                    color = TextMuted,
+                    fontSize = 9.sp,
                     fontFamily = FontFamily.Monospace
                 ),
                 maxLines = 1
@@ -286,7 +312,7 @@ class TravelTrackWidget : GlanceAppWidget() {
         trip: Trip
     ) {
         val detailIntent = createTripDetailIntent(context, trip.id)
-        val dotColor = if (trip.isWaitlisted()) StatusWaitlistAmber else StatusConfirmedGreen
+        val dotColor = getWidgetDotColor(trip)
         val badgeText = if (trip.type == TripType.TRAIN) "TRAIN" else "BUS"
 
         Row(
@@ -298,7 +324,7 @@ class TravelTrackWidget : GlanceAppWidget() {
                 .padding(horizontal = 10.dp, vertical = 6.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
-            // Status dot: green for confirmed, amber for waitlisted
+            // Status dot: green for confirmed, amber for waitlisted/RAC, red for cancelled, grey for unknown
             Box(
                 modifier = GlanceModifier
                     .size(8.dp)
@@ -308,7 +334,7 @@ class TravelTrackWidget : GlanceAppWidget() {
 
             Spacer(modifier = GlanceModifier.width(8.dp))
 
-            // Route + Date/Time + Masked Reference (last 4 only)
+            // Route + Date/Time + Masked Reference (last 4 only) + Last Checked
             Column(modifier = GlanceModifier.defaultWeight()) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(
@@ -336,6 +362,16 @@ class TravelTrackWidget : GlanceAppWidget() {
                     style = TextStyle(
                         color = TextMuted,
                         fontSize = 10.sp,
+                        fontFamily = FontFamily.Monospace
+                    ),
+                    maxLines = 1
+                )
+                // 6. Show the last checked time under the trip row in small text, e.g. "Checked 2h ago"
+                Text(
+                    text = "${trip.effectiveStatus} · ${trip.formattedLastChecked()}",
+                    style = TextStyle(
+                        color = TextMuted,
+                        fontSize = 9.sp,
                         fontFamily = FontFamily.Monospace
                     ),
                     maxLines = 1

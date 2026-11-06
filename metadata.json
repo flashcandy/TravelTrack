@@ -1,6 +1,6 @@
 {
   "name": "TravelTrack",
-  "description": "Offline Nothing OS style train and bus ticket tracker with PDF/image OCR extraction and Jetpack Glance home screen widget.",
+  "description": "Offline Nothing OS style train and bus ticket tracker with PDF/image OCR extraction, 139 SMS live PNR checking, and Jetpack Glance home screen widget.",
   "requestFramePermissions": [],
   "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
 }

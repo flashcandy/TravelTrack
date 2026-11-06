@@ -9,7 +9,6 @@ import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.ui.res.painterResource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -28,6 +27,9 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.outlined.DeleteForever
+import androidx.compose.material.icons.outlined.DeleteSweep
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.Message
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material3.AlertDialog
@@ -50,6 +52,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -76,6 +79,10 @@ fun SettingsScreen(
     onToggleDayBefore: (Boolean) -> Unit,
     onToggleTwoHoursBefore: (Boolean) -> Unit,
     onToggleDarkTheme: (Boolean) -> Unit,
+    onToggleAutoCheckPnr: (Boolean) -> Unit,
+    onToggleCheckInFinal24Hours: (Boolean) -> Unit,
+    onToggleShowCheckConfirmed: (Boolean) -> Unit,
+    onClearPnrHistory: () -> Unit,
     onRefreshWidgetNow: () -> Unit,
     onDeleteAllData: () -> Unit,
     modifier: Modifier = Modifier
@@ -84,6 +91,19 @@ fun SettingsScreen(
 
     val context = LocalContext.current
     var showDeleteAllDialog by remember { mutableStateOf(false) }
+    var showClearHistoryDialog by remember { mutableStateOf(false) }
+
+    var hasSmsPermissions by remember {
+        val sendGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.SEND_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        val receiveGranted = ContextCompat.checkSelfPermission(
+            context,
+            Manifest.permission.RECEIVE_SMS
+        ) == PackageManager.PERMISSION_GRANTED
+        mutableStateOf(sendGranted && receiveGranted)
+    }
 
     var hasNotificationPermission by remember {
         mutableStateOf(
@@ -96,6 +116,13 @@ fun SettingsScreen(
                 true
             }
         )
+    }
+
+    val smsPermissionsLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions()
+    ) { results ->
+        hasSmsPermissions = (results[Manifest.permission.SEND_SMS] == true) &&
+            (results[Manifest.permission.RECEIVE_SMS] == true)
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
@@ -142,6 +169,46 @@ fun SettingsScreen(
                         text = "CANCEL",
                         fontFamily = DotoFontFamily
                     )
+                }
+            }
+        )
+    }
+
+    if (showClearHistoryDialog) {
+        AlertDialog(
+            onDismissRequest = { showClearHistoryDialog = false },
+            title = {
+                Text(
+                    text = "CLEAR PNR CHECK HISTORY?",
+                    fontFamily = DotoFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "This removes all past SMS check logs from the local database. Trip current statuses will remain unchanged.",
+                    fontFamily = SpaceGroteskFontFamily
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showClearHistoryDialog = false
+                        onClearPnrHistory()
+                    },
+                    modifier = Modifier.testTag("confirm_clear_pnr_history_button")
+                ) {
+                    Text(
+                        text = "CLEAR HISTORY",
+                        fontFamily = DotoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = NothingRed
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showClearHistoryDialog = false }) {
+                    Text(text = "CANCEL", fontFamily = DotoFontFamily)
                 }
             }
         )
@@ -210,7 +277,152 @@ fun SettingsScreen(
                     }
                 }
 
-                // 1. Notifications Card
+                // 10. PNR LIVE STATUS CHECKING (139 SMS)
+                item {
+                    NothingCard {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(10.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Message,
+                                contentDescription = null,
+                                tint = NothingRed
+                            )
+                            Text(
+                                text = "139 SMS PNR STATUS CHECKER",
+                                fontFamily = DotoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 15.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+                        Text(
+                            text = "Sends 'PNR <PNR>' to Indian Railways 139 service and auto-reads replies. Strictly offline with zero internet access.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+
+                        // 9. Permissions rationale screen / card
+                        if (!hasSmsPermissions) {
+                            Spacer(modifier = Modifier.height(12.dp))
+                            Box(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .background(MaterialTheme.colorScheme.surfaceVariant)
+                                    .padding(12.dp)
+                            ) {
+                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                    Text(
+                                        text = "SMS PERMISSION REQUIRED FOR 139 CHECKS",
+                                        fontFamily = DotoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 12.sp,
+                                        color = NothingRed
+                                    )
+                                    Text(
+                                        text = "TravelTrack uses SEND_SMS and RECEIVE_SMS strictly to communicate with 139 for PNR status. Messages from all other phone numbers are completely ignored and never read. Sideloaded app mode.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    OutlinedButton(
+                                        onClick = {
+                                            smsPermissionsLauncher.launch(
+                                                arrayOf(
+                                                    Manifest.permission.SEND_SMS,
+                                                    Manifest.permission.RECEIVE_SMS,
+                                                    Manifest.permission.READ_SMS
+                                                )
+                                            )
+                                        },
+                                        shape = RoundedCornerShape(10.dp),
+                                        modifier = Modifier
+                                            .fillMaxWidth()
+                                            .testTag("grant_sms_permissions_button")
+                                    ) {
+                                        Text(
+                                            text = "GRANT SMS PERMISSIONS",
+                                            fontFamily = DotoFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 12.sp,
+                                            color = NothingRed
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(12.dp))
+                        PerforatedDivider()
+                        Spacer(modifier = Modifier.height(8.dp))
+
+                        // 9. If denied, hide the auto-check toggle and keep manual entry available
+                        if (hasSmsPermissions) {
+                            SettingToggleRow(
+                                title = "Auto check PNR status",
+                                subtitle = "Periodic WorkManager check every 6 hours for waitlisted trains within 5 days",
+                                checked = settings.autoCheckPnr,
+                                onCheckedChange = onToggleAutoCheckPnr,
+                                testTag = "toggle_auto_check_pnr"
+                            )
+
+                            SettingToggleRow(
+                                title = "Check in the final 24 hours",
+                                subtitle = "Increase frequency to every 2 hours in the last 24 hours prior to departure",
+                                checked = settings.checkInFinal24Hours,
+                                onCheckedChange = onToggleCheckInFinal24Hours,
+                                testTag = "toggle_check_final_24h"
+                            )
+
+                            SettingToggleRow(
+                                title = "Show check for confirmed trains",
+                                subtitle = "Allow manual 139 check button on confirmed tickets to check coach & seat numbers",
+                                checked = settings.showCheckForConfirmed,
+                                onCheckedChange = onToggleShowCheckConfirmed,
+                                testTag = "toggle_show_check_confirmed"
+                            )
+                        } else {
+                            Text(
+                                text = "Auto-check is disabled because SMS permissions are not granted. You can still update statuses manually from the trip detail screen.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.padding(vertical = 4.dp)
+                            )
+                        }
+
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        // 10. Clear PNR check history button
+                        OutlinedButton(
+                            onClick = { showClearHistoryDialog = true },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(46.dp)
+                                .testTag("clear_pnr_history_button")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.History,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurface,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "CLEAR PNR CHECK HISTORY",
+                                fontFamily = DotoFontFamily,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 12.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                        }
+                    }
+                }
+
+                // 2. Notifications Card
                 item {
                     NothingCard {
                         Row(
@@ -281,7 +493,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // 2. Home Screen Widget Refresh Info Card
+                // 3. Home Screen Widget Refresh Info Card
                 item {
                     val lastRefreshFormatted = remember(settings.lastWidgetRefreshEpochMillis) {
                         if (settings.lastWidgetRefreshEpochMillis <= 0L) {
@@ -304,9 +516,10 @@ fun SettingsScreen(
                         Spacer(modifier = Modifier.height(8.dp))
                         Text(
                             text = "• Sizes: 2x2 (Compact) and 4x2 (List) via Responsive SizeMode\n" +
-                                "• Window: Upcoming trips within the next 5 days (max 3 shown)\n" +
-                                "• Privacy: Masks PNR/Ticket No to last 4 digits; omits passenger names\n" +
-                                "• Schedule: Immediate on save/delete + WorkManager every 6 hours & at midnight",
+                                "• Window: Upcoming trips within next 5 days (max 3 shown)\n" +
+                                "• Dot color: Green (CNF), Amber (RAC/WL), Red (Cancelled), Grey (Unknown)\n" +
+                                "• Info: Displays last checked time under each row, e.g. 'Checked 2h ago'\n" +
+                                "• Schedule: Refreshes immediately on status change + WorkManager every 6h & at midnight",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -381,7 +594,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // 3. Appearance (Nothing OS Full-Dark vs Light)
+                // 4. Appearance (Nothing OS Full-Dark vs Light)
                 item {
                     NothingCard {
                         Text(
@@ -402,11 +615,11 @@ fun SettingsScreen(
                     }
                 }
 
-                // 4. Delete All Data
+                // 5. Delete All Data
                 item {
                     NothingCard(borderColor = NothingRed) {
                         Text(
-                            text = "DATA & PRIVACY",
+                            text = "DATA & PRIVACY (100% OFFLINE)",
                             fontFamily = DotoFontFamily,
                             fontWeight = FontWeight.Bold,
                             fontSize = 15.sp,

@@ -25,11 +25,30 @@ interface TripDao {
     @Query("SELECT * FROM trips WHERE reference = :reference AND reference != '' LIMIT 1")
     suspend fun getTripByReference(reference: String): Trip?
 
+    @Query("SELECT * FROM trips WHERE reference LIKE '%' || :pnrDigits || '%' LIMIT 1")
+    suspend fun getTripByPnrDigits(pnrDigits: String): Trip?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     suspend fun insertTrip(trip: Trip): Long
 
     @Update
     suspend fun updateTrip(trip: Trip)
+
+    @Query(
+        """
+        UPDATE trips 
+        SET currentStatus = :newCurrentStatus, 
+            lastCheckedAt = :checkedAt, 
+            lastRawSmsReply = :rawReply 
+        WHERE id = :tripId
+        """
+    )
+    suspend fun updatePnrStatus(
+        tripId: Long,
+        newCurrentStatus: String,
+        checkedAt: String,
+        rawReply: String?
+    )
 
     @Delete
     suspend fun deleteTrip(trip: Trip)

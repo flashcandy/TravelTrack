@@ -6,6 +6,8 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
 import com.example.data.AppDatabase
 import com.example.data.AppSettings
+import com.example.data.PnrStatusCategory
+import com.example.data.PnrStatusCheck
 import com.example.data.SettingsRepository
 import com.example.data.Trip
 import com.example.data.TripFilter
@@ -18,9 +20,16 @@ import com.example.parser.SampleTickets
 import com.example.parser.TicketDocumentExtractor
 import com.example.parser.TicketFormat
 import com.example.parser.TicketParserRouter
+import com.example.sms.PnrStatusScheduler
+import com.example.sms.SmsSendResult
+import com.example.sms.SmsStatusReceiver
+import com.example.sms.SmsStatusSender
 import com.example.widget.TravelTrackWidgetUpdater
 import com.example.widget.WidgetRefreshScheduler
 import java.time.LocalDateTime
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
@@ -50,13 +59,16 @@ data class HomeTripsUiState(
     val settings: AppSettings = AppSettings(),
     val isExtracting: Boolean = false,
     val extractionMessage: String? = null,
-    val statusBannerMessage: String? = null
+    val statusBannerMessage: String? = null,
+    val pendingPnrTripId: Long? = null,
+    val pendingPnrSecondsRemaining: Int = 0,
+    val showSmsPermissionRationale: Boolean = false
 )
 
 class TravelTrackViewModel(application: Application) : AndroidViewModel(application) {
 
     private val database = AppDatabase.getInstance(application)
-    private val tripRepository = TripRepository(database.tripDao())
+    private val tripRepository = TripRepository(database.tripDao(), database.pnrStatusCheckDao())
     private val settingsRepository = SettingsRepository(application)
     private val parserRouter = TicketParserRouter()
     private val documentExtractor = TicketDocumentExtractor(application, parserRouter)
@@ -70,13 +82,25 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
     private val _extractionMessage = MutableStateFlow<String?>(null)
     private val _statusBannerMessage = MutableStateFlow<String?>(null)
 
+    private val _pendingPnrTripId = MutableStateFlow<Long?>(null)
+    private val _pendingPnrSecondsRemaining = MutableStateFlow(0)
+    private val _showSmsPermissionRationale = MutableStateFlow(false)
+    private var pnrTimeoutJob: Job? = null
+
     val uiState: StateFlow<HomeTripsUiState> = combine(
         tripRepository.allTrips,
         settingsRepository.settingsFlow,
         _isExtracting,
         _extractionMessage,
-        _statusBannerMessage
-    ) { trips, settings, isExtracting, extractionMessage, banner ->
+        combine(
+            _statusBannerMessage,
+            _pendingPnrTripId,
+            _pendingPnrSecondsRemaining,
+            _showSmsPermissionRationale
+        ) { banner, pendingId, seconds, showRationale ->
+            Tuple4(banner, pendingId, seconds, showRationale)
+        }
+    ) { trips, settings, isExtracting, extractionMessage, tuple ->
         val now = LocalDateTime.now()
         val (upcoming, past) = TripFilter.partitionUpcomingAndPast(trips, now)
         val widgetTrips = TripFilter.filterUpcomingForWidget(trips, now, maxDays = 5L, maxCount = 3)
@@ -88,7 +112,10 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
             settings = settings,
             isExtracting = isExtracting,
             extractionMessage = extractionMessage,
-            statusBannerMessage = banner
+            statusBannerMessage = tuple.a,
+            pendingPnrTripId = tuple.b,
+            pendingPnrSecondsRemaining = tuple.c,
+            showSmsPermissionRationale = tuple.d
         )
     }.stateIn(
         scope = viewModelScope,
@@ -96,9 +123,23 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
         initialValue = HomeTripsUiState()
     )
 
+    private data class Tuple4<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+
     init {
         WidgetRefreshScheduler.scheduleAll(application)
         TripNotificationScheduler.ensureNotificationChannel(application)
+        SmsStatusReceiver.ensurePnrNotificationChannel(application)
+
+        // Observe settings to sync periodic PNR worker
+        viewModelScope.launch {
+            settingsRepository.settingsFlow.collect { settings ->
+                if (settings.autoCheckPnr) {
+                    PnrStatusScheduler.schedule(getApplication())
+                } else {
+                    PnrStatusScheduler.cancel(getApplication())
+                }
+            }
+        }
     }
 
     fun navigateTo(destination: ScreenDestination) {
@@ -137,6 +178,89 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
     fun dismissBannerMessage() {
         _statusBannerMessage.value = null
     }
+
+    fun showSmsRationale(show: Boolean) {
+        _showSmsPermissionRationale.value = show
+    }
+
+    // --- PNR Status SMS Checking ---
+
+    fun checkPnrStatusViaSms(trip: Trip) {
+        viewModelScope.launch {
+            val pnrDigits = trip.cleanPnr()
+            if (pnrDigits.length != 10) {
+                _statusBannerMessage.value = "ERROR: PNR must be 10 digits (found: '${trip.reference}')"
+                return@launch
+            }
+
+            when (val sendResult = SmsStatusSender.sendPnrStatusCheck(getApplication(), trip, isManualTrigger = true)) {
+                is SmsSendResult.PermissionDenied -> {
+                    _showSmsPermissionRationale.value = true
+                }
+                is SmsSendResult.Error -> {
+                    _statusBannerMessage.value = "SMS SEND FAILED: ${sendResult.message}"
+                }
+                is SmsSendResult.Success -> {
+                    _statusBannerMessage.value = "SENT 'PNR $pnrDigits' TO 139 // WAITING FOR REPLY..."
+                    startPnrTimeoutCountdown(trip.id)
+                }
+            }
+        }
+    }
+
+    private fun startPnrTimeoutCountdown(tripId: Long) {
+        pnrTimeoutJob?.cancel()
+        _pendingPnrTripId.value = tripId
+        _pendingPnrSecondsRemaining.value = 180
+
+        pnrTimeoutJob = viewModelScope.launch {
+            var remaining = 180
+            while (remaining > 0) {
+                delay(1000L)
+                remaining -= 1
+                _pendingPnrSecondsRemaining.value = remaining
+
+                // If check resolved in database, end waiting
+                val latestCheck = tripRepository.getLatestCheckForTrip(tripId)
+                if (latestCheck != null && latestCheck.replyReceivedAt != null) {
+                    break
+                }
+            }
+            _pendingPnrTripId.value = null
+            _pendingPnrSecondsRemaining.value = 0
+        }
+    }
+
+    fun cancelPendingPnrCheck() {
+        pnrTimeoutJob?.cancel()
+        _pendingPnrTripId.value = null
+        _pendingPnrSecondsRemaining.value = 0
+    }
+
+    fun updateStatusManually(tripId: Long, exactStatus: String) {
+        viewModelScope.launch {
+            val cleaned = exactStatus.trim()
+            if (cleaned.isNotBlank()) {
+                tripRepository.updateStatusManually(tripId, cleaned)
+                val app = getApplication<Application>()
+                TravelTrackWidgetUpdater.updateAllWidgets(app)
+                _statusBannerMessage.value = "STATUS UPDATED // $cleaned"
+            }
+        }
+    }
+
+    fun observePnrChecksForTrip(tripId: Long): Flow<List<PnrStatusCheck>> {
+        return tripRepository.observeChecksForTrip(tripId)
+    }
+
+    fun clearPnrCheckHistory() {
+        viewModelScope.launch {
+            tripRepository.clearPnrCheckHistory()
+            _statusBannerMessage.value = "PNR CHECK HISTORY CLEARED"
+        }
+    }
+
+    // --- Ticket File Extraction & Processing ---
 
     fun processTicketUri(uri: Uri, mimeTypeHint: String? = null) {
         viewModelScope.launch {
@@ -206,8 +330,8 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
             currency = trip.currency,
             reference = trip.reference,
             bookingStatus = trip.bookingStatus.orEmpty(),
-            currentStatus = trip.status,
-            status = trip.status,
+            currentStatus = trip.currentStatus.orEmpty(),
+            status = trip.effectiveStatus,
             passengerNames = trip.passengerNames,
             seatNumbers = trip.seatNumbers.orEmpty(),
             transactionId = trip.transactionId.orEmpty(),
@@ -317,6 +441,8 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
         }
     }
 
+    // --- Settings Updates ---
+
     fun setNotifyDayBefore(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setNotifyDayBefore(enabled)
@@ -334,6 +460,24 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
     fun setDarkTheme(dark: Boolean) {
         viewModelScope.launch {
             settingsRepository.setDarkTheme(dark)
+        }
+    }
+
+    fun setAutoCheckPnr(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setAutoCheckPnr(enabled)
+        }
+    }
+
+    fun setCheckInFinal24Hours(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setCheckInFinal24Hours(enabled)
+        }
+    }
+
+    fun setShowCheckForConfirmed(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setShowCheckForConfirmed(enabled)
         }
     }
 
