@@ -401,7 +401,7 @@ private fun TripItemCard(
     NothingCard(
         onClick = onClick,
         borderColor = if (trip.isWaitlisted() && !isPast) {
-            NothingRed.copy(alpha = 0.7f)
+            com.example.ui.theme.StatusWaitlistAmber.copy(alpha = 0.8f)
         } else {
             MaterialTheme.colorScheme.outline
         },
@@ -429,7 +429,7 @@ private fun TripItemCard(
                 )
                 Spacer(modifier = Modifier.width(8.dp))
                 Text(
-                    text = "${trip.type.name} // ${trip.operator}",
+                    text = "${trip.type.name} // ${trip.operatorDisplay()}",
                     fontFamily = SpaceGroteskFontFamily,
                     fontWeight = FontWeight.Medium,
                     fontSize = 12.sp,
@@ -440,8 +440,8 @@ private fun TripItemCard(
             }
             Spacer(modifier = Modifier.width(8.dp))
             StatusPill(
-                status = trip.status,
-                isWaitlisted = trip.isWaitlisted()
+                status = trip.displayStatus(),
+                statusCategory = trip.statusCategory
             )
         }
 
@@ -457,14 +457,18 @@ private fun TripItemCard(
                 Text(
                     text = trip.title,
                     style = MaterialTheme.typography.titleLarge,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = MaterialTheme.colorScheme.onSurface,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
                 if (trip.originCode.isNotBlank() || trip.destinationCode.isNotBlank()) {
                     Text(
                         text = "${trip.originCode.ifBlank { "---" }} ➔ ${trip.destinationCode.ifBlank { "---" }}",
                         fontFamily = DotoFontFamily,
                         fontSize = 12.sp,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                 }
             }

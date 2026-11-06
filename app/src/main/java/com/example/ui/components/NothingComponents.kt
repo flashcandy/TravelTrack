@@ -27,14 +27,18 @@ import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.PathEffect
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.PnrStatusCategory
+import com.example.data.Trip
 import com.example.parser.ConfidenceLevel
 import com.example.ui.theme.DotoFontFamily
 import com.example.ui.theme.NothingRed
 import com.example.ui.theme.SpaceGroteskFontFamily
 import com.example.ui.theme.StatusConfirmedGreen
 import com.example.ui.theme.StatusWaitlistAmber
+import com.example.ui.theme.mapStatusCategoryToColor
 
 /**
  * Flat Nothing OS card: 1 dp border in low-contrast grey, 16 dp corner radius, no shadow, generous padding.
@@ -88,15 +92,20 @@ fun PerforatedDivider(
 }
 
 /**
- * Status dot + monospace pill badge (green for Confirmed, amber for Waitlisted).
+ * Status dot + monospace pill badge using unified status-to-color mapping:
+ * CNF = green, RAC = amber, any WL variant = amber, CANCELLED = red, UNKNOWN or not checked = grey.
  */
 @Composable
 fun StatusPill(
     status: String,
-    isWaitlisted: Boolean,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    isWaitlisted: Boolean? = null,
+    statusCategory: PnrStatusCategory = when {
+        isWaitlisted == true -> PnrStatusCategory.WAITLISTED
+        else -> Trip.resolveStatusCategory(status)
+    }
 ) {
-    val dotColor = if (isWaitlisted) StatusWaitlistAmber else StatusConfirmedGreen
+    val dotColor = mapStatusCategoryToColor(statusCategory)
     Row(
         modifier = modifier
             .clip(RoundedCornerShape(50))
@@ -112,11 +121,13 @@ fun StatusPill(
         )
         Spacer(modifier = Modifier.width(6.dp))
         Text(
-            text = status.ifBlank { "CONFIRMED" }.uppercase(),
+            text = status.ifBlank { "NOT CHECKED" }.uppercase(),
             fontFamily = DotoFontFamily,
             fontWeight = FontWeight.Bold,
             fontSize = 11.sp,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }

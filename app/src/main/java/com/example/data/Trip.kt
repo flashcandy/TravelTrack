@@ -8,6 +8,8 @@ import java.time.Duration
 import java.time.LocalDateTime
 import java.util.Locale
 
+import com.example.parser.Passenger
+
 enum class TripType {
     TRAIN,
     BUS
@@ -29,6 +31,31 @@ class TripTypeConverters {
     @TypeConverter
     fun toTripType(value: String): TripType =
         runCatching { TripType.valueOf(value) }.getOrDefault(TripType.TRAIN)
+
+    @TypeConverter
+    fun fromPassengerList(passengers: List<Passenger>?): String {
+        if (passengers.isNullOrEmpty()) return ""
+        return passengers.joinToString("\n") {
+            "${it.name}|${it.age ?: ""}|${it.gender}|${it.bookingStatus}|${it.currentStatus}"
+        }
+    }
+
+    @TypeConverter
+    fun toPassengerList(raw: String?): List<Passenger> {
+        if (raw.isNullOrBlank()) return emptyList()
+        return raw.lines().mapNotNull { line ->
+            val parts = line.split("|")
+            if (parts.isNotEmpty() && parts[0].isNotBlank()) {
+                Passenger(
+                    name = parts[0],
+                    age = parts.getOrNull(1)?.toIntOrNull(),
+                    gender = parts.getOrNull(2).orEmpty(),
+                    bookingStatus = parts.getOrNull(3).orEmpty(),
+                    currentStatus = parts.getOrNull(4).orEmpty()
+                )
+            } else null
+        }
+    }
 }
 
 @Entity(
@@ -57,6 +84,7 @@ data class Trip(
     /** Fallback or original extracted status string */
     val status: String,
     val passengerNames: String,
+    val passengers: List<Passenger> = emptyList(),
     val seatNumbers: String? = null,
     val travelClass: String? = null,
     /** Booking status kept distinct from current live status (e.g., "RLWL/29") */
@@ -79,26 +107,43 @@ data class Trip(
         get() = amount / 100.0
 
     /**
-     * Effective status prefers the live updated currentStatus if present, falling back to status.
+     * Train formatted as "11020 KONARK EXPRESS"
+     */
+    val train: String
+        get() = operatorDisplay()
+
+    fun operatorDisplay(): String {
+        return operator.replace("/", " ").trim()
+    }
+
+    /**
+     * Effective status prefers the live updated currentStatus if present, falling back to bookingStatus or status.
      */
     val effectiveStatus: String
-        get() = currentStatus?.trim()?.takeIf { it.isNotEmpty() } ?: status.trim()
+        get() = currentStatus?.trim()?.takeIf { it.isNotEmpty() }
+            ?: bookingStatus?.trim()?.takeIf { it.isNotEmpty() }
+            ?: status.trim()
+
+    /**
+     * Status displayed on the boarding pass badge:
+     * Prefers current live status, then booking status, then raw status.
+     */
+    fun displayStatus(): String {
+        return currentStatus?.trim()?.takeIf { it.isNotEmpty() }
+            ?: bookingStatus?.trim()?.takeIf { it.isNotEmpty() }
+            ?: status.trim()
+    }
 
     val statusCategory: PnrStatusCategory
-        get() {
-            val upper = effectiveStatus.uppercase(Locale.US)
-            return when {
-                upper.startsWith("CAN") || upper.contains("CANCEL") -> PnrStatusCategory.CANCELLED
-                upper.contains("CHART PREPARED") -> PnrStatusCategory.CHART_PREPARED
-                upper.startsWith("CNF") || upper.startsWith("CONFIRM") -> PnrStatusCategory.CONFIRMED
-                upper.startsWith("RAC") -> PnrStatusCategory.RAC
-                upper.startsWith("RLWL") || upper.startsWith("PQWL") ||
-                    upper.startsWith("RSWL") || upper.startsWith("TQWL") ||
-                    upper.startsWith("WL") || upper.contains("/WL") ||
-                    upper.contains("WAITLIST") -> PnrStatusCategory.WAITLISTED
-                else -> PnrStatusCategory.UNKNOWN
-            }
+        get() = resolveStatusCategory(effectiveStatus)
+
+    fun formattedPassengersDisplay(): String {
+        return if (passengers.isNotEmpty()) {
+            passengers.joinToString(", ") { it.displayNameWithDetails() }
+        } else {
+            passengerNames
         }
+    }
 
     fun formattedAmount(): String {
         val rupees = amount / 100.0
@@ -116,6 +161,27 @@ data class Trip(
     fun isConfirmed(): Boolean = statusCategory == PnrStatusCategory.CONFIRMED
 
     fun isCancelled(): Boolean = statusCategory == PnrStatusCategory.CANCELLED
+
+    companion object {
+        fun resolveStatusCategory(statusStr: String?): PnrStatusCategory {
+            if (statusStr.isNullOrBlank()) return PnrStatusCategory.UNKNOWN
+            val upper = statusStr.trim().uppercase(Locale.US)
+            if (upper.contains("NOT CHECKED") || upper == "N/A" || upper == "UNKNOWN") {
+                return PnrStatusCategory.UNKNOWN
+            }
+            return when {
+                upper.startsWith("CAN") || upper.contains("CANCEL") -> PnrStatusCategory.CANCELLED
+                upper.contains("CHART PREPARED") -> PnrStatusCategory.CHART_PREPARED
+                upper.startsWith("CNF") || upper.startsWith("CONFIRM") -> PnrStatusCategory.CONFIRMED
+                upper.startsWith("RAC") -> PnrStatusCategory.RAC
+                upper.startsWith("RLWL") || upper.startsWith("PQWL") ||
+                    upper.startsWith("RSWL") || upper.startsWith("TQWL") ||
+                    upper.startsWith("GNWL") || upper.startsWith("WL") ||
+                    upper.contains("/WL") || upper.contains("WAITLIST") -> PnrStatusCategory.WAITLISTED
+                else -> PnrStatusCategory.UNKNOWN
+            }
+        }
+    }
 
     /**
      * Determines whether this trip can have its PNR checked via SMS to 139.

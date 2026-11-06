@@ -39,6 +39,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -50,6 +51,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.TextStyle
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.R
@@ -78,11 +80,21 @@ fun TripDetailScreen(
     onUpdateStatusManually: (Long, String) -> Unit,
     modifier: Modifier = Modifier
 ) {
-    BackHandler(onBack = onBack)
-
     var showDeleteConfirm by remember { mutableStateOf(false) }
     var showManualUpdateDialog by remember { mutableStateOf(false) }
     var revealFullPnr by remember { mutableStateOf(false) }
+
+    // Re-hide full PNR automatically whenever the user navigates away or views a different trip
+    DisposableEffect(trip?.id) {
+        onDispose {
+            revealFullPnr = false
+        }
+    }
+
+    BackHandler {
+        revealFullPnr = false
+        onBack()
+    }
 
     if (showDeleteConfirm && trip != null) {
         AlertDialog(
@@ -378,23 +390,26 @@ fun TripDetailScreen(
                     // Main Boarding Pass Card
                     item {
                         NothingCard {
+                            // Single horizontal line showing train / operator name and status pill
                             Row(
                                 modifier = Modifier.fillMaxWidth(),
                                 horizontalArrangement = Arrangement.SpaceBetween,
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = trip.operator,
+                                    text = trip.operatorDisplay(),
                                     fontFamily = SpaceGroteskFontFamily,
                                     fontWeight = FontWeight.SemiBold,
                                     fontSize = 13.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis,
                                     modifier = Modifier.weight(1f)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
                                 StatusPill(
-                                    status = trip.effectiveStatus,
-                                    isWaitlisted = trip.isWaitlisted()
+                                    status = trip.displayStatus(),
+                                    statusCategory = trip.statusCategory
                                 )
                             }
 
@@ -412,12 +427,16 @@ fun TripDetailScreen(
                                             trip.originName.take(3).uppercase()
                                         },
                                         style = MaterialTheme.typography.displayMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.originName,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
@@ -439,12 +458,16 @@ fun TripDetailScreen(
                                             trip.destinationName.take(3).uppercase()
                                         },
                                         style = MaterialTheme.typography.displayMedium,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.destinationName,
                                         style = MaterialTheme.typography.bodyMedium,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -463,20 +486,26 @@ fun TripDetailScreen(
                                         text = "DEPARTURE",
                                         fontFamily = SpaceGroteskFontFamily,
                                         fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.departureTime.ifBlank { "--:--" },
                                         fontFamily = DotoFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 24.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.departureDate,
                                         fontFamily = DotoFontFamily,
                                         fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
 
@@ -485,20 +514,26 @@ fun TripDetailScreen(
                                         text = "ARRIVAL",
                                         fontFamily = SpaceGroteskFontFamily,
                                         fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.arrivalTime ?: "--:--",
                                         fontFamily = DotoFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 24.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
+                                        color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.arrivalDate ?: "N/A",
                                         fontFamily = DotoFontFamily,
                                         fontSize = 13.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
@@ -522,10 +557,12 @@ fun TripDetailScreen(
                                         },
                                         fontFamily = SpaceGroteskFontFamily,
                                         fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
-                                    // 11. Show PNR as "•••• 7777" on screens where it is not being checked
-                                    val displayPnr = if (revealFullPnr || isPnrCheckPending) {
+                                    // Masked display "•••• 8777" (last 4 digits only), tap to reveal while on this screen
+                                    val displayPnr = if (revealFullPnr) {
                                         trip.cleanPnr().ifBlank { trip.reference }
                                     } else {
                                         trip.formattedMaskedPnr()
@@ -536,6 +573,8 @@ fun TripDetailScreen(
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 16.sp,
                                         color = MaterialTheme.colorScheme.onSurface,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis,
                                         modifier = Modifier
                                             .clickable { revealFullPnr = !revealFullPnr }
                                             .testTag("detail_reference_value")
@@ -547,21 +586,25 @@ fun TripDetailScreen(
                                         text = "TOTAL FARE (${trip.currency})",
                                         fontFamily = SpaceGroteskFontFamily,
                                         fontSize = 11.sp,
-                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                     Text(
                                         text = trip.formattedAmount(),
                                         fontFamily = DotoFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 26.sp,
-                                        color = NothingRed
+                                        color = NothingRed,
+                                        maxLines = 1,
+                                        overflow = TextOverflow.Ellipsis
                                     )
                                 }
                             }
                         }
                     }
 
-                    // 1. DATA MODEL & STATUS DETAILS CARD
+                    // LIVE STATUS SECTION
                     item {
                         NothingCard {
                             Row(
@@ -570,13 +613,14 @@ fun TripDetailScreen(
                                 verticalAlignment = Alignment.CenterVertically
                             ) {
                                 Text(
-                                    text = "LIVE STATUS & TRACKING",
+                                    text = "LIVE STATUS",
                                     fontFamily = DotoFontFamily,
                                     fontWeight = FontWeight.Bold,
                                     fontSize = 14.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
-                                // 5. MANUAL FALLBACK: "Update status manually" button
                                 Text(
                                     text = "[UPDATE MANUALLY]",
                                     fontFamily = DotoFontFamily,
@@ -593,22 +637,20 @@ fun TripDetailScreen(
                             Spacer(modifier = Modifier.height(12.dp))
 
                             DetailRow(
-                                label = "CURRENT LIVE STATUS",
-                                value = trip.effectiveStatus,
+                                label = "Current status",
+                                value = if (!trip.currentStatus.isNullOrBlank()) trip.currentStatus else "Not checked yet",
                                 useDoto = true
                             )
 
-                            if (!trip.bookingStatus.isNullOrBlank()) {
-                                DetailRow(
-                                    label = "BOOKING TIME STATUS",
-                                    value = trip.bookingStatus,
-                                    useDoto = true
-                                )
-                            }
+                            DetailRow(
+                                label = "Booking status",
+                                value = if (!trip.bookingStatus.isNullOrBlank()) trip.bookingStatus else trip.status,
+                                useDoto = true
+                            )
 
                             DetailRow(
-                                label = "LAST CHECKED",
-                                value = if (trip.lastCheckedAt != null) {
+                                label = "Last checked",
+                                value = if (!trip.lastCheckedAt.isNullOrBlank()) {
                                     "${trip.lastCheckedAt} (${trip.formattedLastChecked()})"
                                 } else {
                                     "Not checked yet"
@@ -619,26 +661,27 @@ fun TripDetailScreen(
                             // Raw SMS reply card for debugging / manual verification
                             if (!trip.lastRawSmsReply.isNullOrBlank()) {
                                 DetailRow(
-                                    label = "LAST 139 SMS REPLY (DEBUG)",
+                                    label = "Last 139 SMS reply (debug)",
                                     value = trip.lastRawSmsReply,
                                     useDoto = false
                                 )
                             }
 
                             if (!trip.travelClass.isNullOrBlank()) {
-                                DetailRow(label = "CLASS", value = trip.travelClass)
+                                DetailRow(label = "Class", value = trip.travelClass)
                             }
                             if (!trip.seatNumbers.isNullOrBlank()) {
-                                DetailRow(label = "SEATS / BERTH", value = trip.seatNumbers, useDoto = true)
+                                DetailRow(label = "Seats / Berth", value = trip.seatNumbers, useDoto = true)
                             }
-                            if (trip.passengerNames.isNotBlank()) {
-                                DetailRow(label = "PASSENGERS", value = trip.passengerNames)
+                            val passengerText = trip.formattedPassengersDisplay()
+                            if (passengerText.isNotBlank()) {
+                                DetailRow(label = "Passengers", value = passengerText)
                             }
                             if (!trip.pickupPoint.isNullOrBlank()) {
-                                DetailRow(label = "PICKUP POINT", value = trip.pickupPoint)
+                                DetailRow(label = "Pickup point", value = trip.pickupPoint)
                             }
                             if (!trip.dropPoint.isNullOrBlank()) {
-                                DetailRow(label = "DROP POINT", value = trip.dropPoint)
+                                DetailRow(label = "Drop point", value = trip.dropPoint)
                             }
                         }
                     }

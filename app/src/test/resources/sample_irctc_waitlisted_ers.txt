@@ -1,0 +1,17 @@
+IRCTC Electronic Reservation Slip (ERS)
+Booked from: KHAMMAM (KMT)   To: SECUNDERABAD JN. (SC)
+Departure* 06:35 19-Nov-2026   Arrival* 10:50 19-Nov-2026
+PNR: 6952208777   Train No./Name: 11020/KONARK EXPRESS   Class: SLEEPER CLASS (SL)
+Quota: GENERAL (GN)   Booking Date: 10-Nov-2026 14:22:10 HRS
+
+Passenger Details:
+# Name Age Gender Booking Status Current Status
+1. NOMULA SAI CHAND 30 M RLWL/29 RLWL/28
+
+Total Fare (all inclusive): Rs. 201.80
+Transaction ID: 100004128912345
+
+Important Instructions:
+1. One of the passengers must carry original identity card as printed on the ticket.
+2. The authority to travel of passengers is subject to rules printed on the ticket.
+Acronyms: RLWL: Remote Location Waitlist, PQWL: Pooled Quota Waitlist

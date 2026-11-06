@@ -50,12 +50,22 @@ data class ParsedTicketDraft(
     /** Effective status (currentStatus if present, else bookingStatus or status) */
     val status: String = "",
     val passengerNames: String = "",
+    val passengers: List<Passenger> = emptyList(),
     val seatNumbers: String = "",
     val transactionId: String = "",
     val rawText: String = "",
     val fieldConfidences: Map<String, ConfidenceLevel> = emptyMap(),
     val fieldHints: Map<String, String> = emptyMap()
 ) {
+    val train: String
+        get() = when {
+            trainNumber.isNotBlank() && trainName.isNotBlank() -> "$trainNumber $trainName"
+            trainNumber.isNotBlank() -> trainNumber
+            trainName.isNotBlank() -> trainName
+            operator.isNotBlank() -> operator.replace("/", " ")
+            else -> ""
+        }
+
     val departureDateTimeIso: String
         get() = if (departureDate.isNotBlank() && departureTime.isNotBlank()) {
             "${departureDate.trim()}T${departureTime.trim()}"
@@ -84,7 +94,7 @@ data class ParsedTicketDraft(
             type == TripType.TRAIN -> "IRCTC Indian Railways"
             else -> "Bus Operator"
         }
-        val effectiveStatus = status.ifBlank { currentStatus.ifBlank { bookingStatus.ifBlank { "Confirmed" } } }
+        val effectiveStatus = status.ifBlank { bookingStatus.ifBlank { currentStatus.ifBlank { "Confirmed" } } }
 
         return Trip(
             id = existingId,
@@ -102,6 +112,7 @@ data class ParsedTicketDraft(
             reference = reference.trim(),
             status = effectiveStatus.trim(),
             passengerNames = passengerNames.trim(),
+            passengers = passengers,
             seatNumbers = seatNumbers.trim().takeIf { it.isNotEmpty() },
             travelClass = travelClass.trim().takeIf { it.isNotEmpty() },
             bookingStatus = bookingStatus.trim().takeIf { it.isNotEmpty() },

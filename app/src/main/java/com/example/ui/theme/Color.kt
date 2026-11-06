@@ -20,6 +20,25 @@ val NothingRed = Color(0xFFD71921)
 val NothingRedContainerDark = Color(0xFF2C090B)
 val NothingRedContainerLight = Color(0xFFFDE8E9)
 
-// Status Dot Colors (Widget & Badges)
+// Status Dot Colors (Widget, Chip, List & Badges)
+// CNF = green, RAC = amber, any WL variant (WL, RLWL, PQWL, RSWL, TQWL, GNWL) = amber, CANCELLED = red, UNKNOWN or not checked = grey
 val StatusConfirmedGreen = Color(0xFF00E676)
 val StatusWaitlistAmber = Color(0xFFFFB300)
+val StatusCancelledRed = Color(0xFFD71921)
+val StatusUnknownGrey = Color(0xFF8E8E8E)
+
+fun mapStatusCategoryToColor(category: com.example.data.PnrStatusCategory): Color {
+    return when (category) {
+        com.example.data.PnrStatusCategory.CONFIRMED -> StatusConfirmedGreen
+        com.example.data.PnrStatusCategory.RAC,
+        com.example.data.PnrStatusCategory.WAITLISTED -> StatusWaitlistAmber
+        com.example.data.PnrStatusCategory.CANCELLED -> StatusCancelledRed
+        com.example.data.PnrStatusCategory.UNKNOWN,
+        com.example.data.PnrStatusCategory.CHART_PREPARED -> StatusUnknownGrey
+    }
+}
+
+fun mapStatusToColor(status: String?): Color {
+    val category = com.example.data.Trip.resolveStatusCategory(status)
+    return mapStatusCategoryToColor(category)
+}
