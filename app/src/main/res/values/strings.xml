@@ -1,0 +1,17 @@
+<resources>
+    <string name="app_name">TravelTrack</string>
+    <string name="widget_description">Upcoming train and bus trips in the next 5 days</string>
+    <string name="widget_empty_state">No trips in the next 5 days</string>
+    <string name="waitlist_warning_banner">Waitlisted tickets may not be allowed to board. Check with the operator.</string>
+    <string name="notification_permission_rationale">TravelTrack uses notifications exclusively on your device to alert you 1 day before and 2 hours before your train or bus departure.</string>
+    <string name="channel_trip_alerts_name">Trip Departure Alerts</string>
+    <string name="channel_trip_alerts_desc">Reminders 24 hours and 2 hours prior to scheduled departures</string>
+    <string name="section_upcoming">UPCOMING</string>
+    <string name="section_past">PAST</string>
+    <string name="action_add_ticket">Add Ticket</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_edit_trip">Edit Trip</string>
+    <string name="action_delete_trip">Delete Trip</string>
+    <string name="action_save_trip">SAVE TRIP</string>
+    <string name="action_delete_all_data">DELETE ALL DATA</string>
+</resources>

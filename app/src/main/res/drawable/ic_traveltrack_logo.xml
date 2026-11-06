@@ -1,0 +1,26 @@
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="48dp"
+    android:height="48dp"
+    android:viewportWidth="48"
+    android:viewportHeight="48">
+
+    <!-- Ticket Card Body with perforated edge notches -->
+    <path
+        android:fillColor="#FFFFFF"
+        android:pathData="M8,10 C8,8.9 8.9,8 10,8 L38,8 C39.1,8 40,8.9 40,10 L40,20 C37.8,20 36,21.8 36,24 C36,26.2 37.8,28 40,28 L40,38 C40,39.1 39.1,40 38,40 L10,40 C8.9,40 8,39.1 8,38 L8,28 C10.2,28 12,26.2 12,24 C12,21.8 10.2,20 8,20 Z" />
+
+    <!-- Perforated dotted line cut across ticket center -->
+    <path
+        android:fillColor="#111111"
+        android:pathData="M16,23h3v2h-3z M21,23h3v2h-3z M26,23h3v2h-3z M31,23h3v2h-3z" />
+
+    <!-- Geometric Train / Bus Front Silhouette in top half -->
+    <path
+        android:fillColor="#000000"
+        android:pathData="M16,13h16v7h-16z M18,15h4v3h-4z M26,15h4v3h-4z" />
+
+    <!-- Nothing Red Status Indicator Dot in lower half -->
+    <path
+        android:fillColor="#D71921"
+        android:pathData="M24,31m-3,0a3,3 0 1,1 6,0a3,3 0 1,1 -6,0" />
+</vector>

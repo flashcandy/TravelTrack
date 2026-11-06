@@ -1,0 +1,61 @@
+name: Build Android APK
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    name: Build Debug APK
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up JDK 21
+        uses: actions/setup-java@v4
+        with:
+          java-version: '21'
+          distribution: 'temurin'
+          cache: gradle
+
+      - name: Grant execute permission for gradlew
+        run: chmod +x gradlew
+
+      - name: Prepare environment & keystore
+        run: |
+          touch .env
+          if [ -f "debug.keystore.base64" ]; then
+            echo "Restoring debug.keystore from base64..."
+            base64 -d debug.keystore.base64 > debug.keystore
+          else
+            echo "Generating debug.keystore with keytool..."
+            keytool -genkey -v -keystore debug.keystore -alias androiddebugkey -keyalg RSA -keysize 2048 -validity 10000 -storepass android -keypass android -dname "CN=Android Debug,O=Android,C=US"
+          fi
+
+      - name: Build Debug APK
+        run: ./gradlew assembleDebug --stacktrace
+
+      - name: Stage APK for artifact upload
+        run: |
+          mkdir -p release-apks
+          APK_FILE=$(find . -type f -name "*.apk" ! -path "*/intermediates/*" ! -path "./release-apks/*" | head -n 1)
+          echo "Located APK at: $APK_FILE"
+          if [ -z "$APK_FILE" ] || [ ! -f "$APK_FILE" ]; then
+            echo "Error: APK file was not found!"
+            exit 1
+          fi
+          cp "$APK_FILE" release-apks/TravelTrack-debug.apk
+          cp "$APK_FILE" release-apks/app-debug.apk
+          ls -la release-apks/
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: TravelTrack-debug-apk
+          path: release-apks/*.apk
+          retention-days: 30
