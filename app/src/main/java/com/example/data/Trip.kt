@@ -103,6 +103,8 @@ data class Trip(
     /** Raw 139 SMS reply text retained for debugging and user review */
     val lastRawSmsReply: String? = null
 ) {
+    val lastRawReply: String?
+        get() = lastRawSmsReply
     val amountInRupees: Double
         get() = amount / 100.0
 

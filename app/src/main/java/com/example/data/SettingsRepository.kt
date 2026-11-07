@@ -20,7 +20,8 @@ data class AppSettings(
     val lastWidgetRefreshEpochMillis: Long = 0L,
     val autoCheckPnr: Boolean = false,
     val checkInFinal24Hours: Boolean = true,
-    val showCheckForConfirmed: Boolean = false
+    val showCheckForConfirmed: Boolean = false,
+    val autoSendSms: Boolean = false
 )
 
 class SettingsRepository(private val context: Context) {
@@ -32,6 +33,7 @@ class SettingsRepository(private val context: Context) {
         val AUTO_CHECK_PNR = booleanPreferencesKey("auto_check_pnr")
         val CHECK_IN_FINAL_24H = booleanPreferencesKey("check_in_final_24h")
         val SHOW_CHECK_CONFIRMED = booleanPreferencesKey("show_check_confirmed")
+        val AUTO_SEND_SMS = booleanPreferencesKey("auto_send_sms")
     }
 
     val settingsFlow: Flow<AppSettings> = context.dataStore.data.map { prefs ->
@@ -42,7 +44,8 @@ class SettingsRepository(private val context: Context) {
             lastWidgetRefreshEpochMillis = prefs[Keys.LAST_WIDGET_REFRESH] ?: 0L,
             autoCheckPnr = prefs[Keys.AUTO_CHECK_PNR] ?: false,
             checkInFinal24Hours = prefs[Keys.CHECK_IN_FINAL_24H] ?: true,
-            showCheckForConfirmed = prefs[Keys.SHOW_CHECK_CONFIRMED] ?: false
+            showCheckForConfirmed = prefs[Keys.SHOW_CHECK_CONFIRMED] ?: false,
+            autoSendSms = prefs[Keys.AUTO_SEND_SMS] ?: false
         )
     }
 
@@ -74,5 +77,9 @@ class SettingsRepository(private val context: Context) {
 
     suspend fun setShowCheckForConfirmed(enabled: Boolean) {
         context.dataStore.edit { it[Keys.SHOW_CHECK_CONFIRMED] = enabled }
+    }
+
+    suspend fun setAutoSendSms(enabled: Boolean) {
+        context.dataStore.edit { it[Keys.AUTO_SEND_SMS] = enabled }
     }
 }

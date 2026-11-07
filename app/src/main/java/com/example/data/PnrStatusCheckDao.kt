@@ -28,6 +28,16 @@ interface PnrStatusCheckDao {
     )
     suspend fun findPendingCheck(pnr: String, sinceTimestamp: Long): PnrStatusCheck?
 
+    @Query(
+        """
+        SELECT * FROM pnr_status_checks 
+        WHERE replyReceivedAt IS NULL 
+          AND requestedAt >= :sinceTimestamp
+        ORDER BY requestedAt DESC
+        """
+    )
+    suspend fun getPendingChecks(sinceTimestamp: Long): List<PnrStatusCheck>
+
     @Query("SELECT * FROM pnr_status_checks WHERE tripId = :tripId ORDER BY requestedAt DESC")
     fun observeChecksForTrip(tripId: Long): Flow<List<PnrStatusCheck>>
 

@@ -56,6 +56,9 @@ interface TripDao {
     @Query("DELETE FROM trips WHERE id = :id")
     suspend fun deleteTripById(id: Long)
 
+    @Query("UPDATE trips SET lastRawSmsReply = NULL")
+    suspend fun clearAllRawReplies()
+
     @Query("DELETE FROM trips")
     suspend fun deleteAllTrips()
 }

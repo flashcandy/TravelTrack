@@ -1,6 +1,7 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.viewModelScope
@@ -20,10 +21,11 @@ import com.example.parser.SampleTickets
 import com.example.parser.TicketDocumentExtractor
 import com.example.parser.TicketFormat
 import com.example.parser.TicketParserRouter
+import com.example.sms.PnrCheckDispatchResult
+import com.example.sms.PnrReplyListenerService
 import com.example.sms.PnrStatusScheduler
+import com.example.sms.PnrStatusSender
 import com.example.sms.SmsSendResult
-import com.example.sms.SmsStatusReceiver
-import com.example.sms.SmsStatusSender
 import com.example.widget.TravelTrackWidgetUpdater
 import com.example.widget.WidgetRefreshScheduler
 import java.time.LocalDateTime
@@ -62,7 +64,8 @@ data class HomeTripsUiState(
     val statusBannerMessage: String? = null,
     val pendingPnrTripId: Long? = null,
     val pendingPnrSecondsRemaining: Int = 0,
-    val showSmsPermissionRationale: Boolean = false
+    val showSmsPermissionRationale: Boolean = false,
+    val isNotificationAccessGranted: Boolean = false
 )
 
 class TravelTrackViewModel(application: Application) : AndroidViewModel(application) {
@@ -85,6 +88,7 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
     private val _pendingPnrTripId = MutableStateFlow<Long?>(null)
     private val _pendingPnrSecondsRemaining = MutableStateFlow(0)
     private val _showSmsPermissionRationale = MutableStateFlow(false)
+    private val _isNotificationAccessGranted = MutableStateFlow(false)
     private var pnrTimeoutJob: Job? = null
 
     val uiState: StateFlow<HomeTripsUiState> = combine(
@@ -96,9 +100,10 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
             _statusBannerMessage,
             _pendingPnrTripId,
             _pendingPnrSecondsRemaining,
-            _showSmsPermissionRationale
-        ) { banner, pendingId, seconds, showRationale ->
-            Tuple4(banner, pendingId, seconds, showRationale)
+            _showSmsPermissionRationale,
+            _isNotificationAccessGranted
+        ) { banner, pendingId, seconds, showRationale, notifGranted ->
+            Tuple5(banner, pendingId, seconds, showRationale, notifGranted)
         }
     ) { trips, settings, isExtracting, extractionMessage, tuple ->
         val now = LocalDateTime.now()
@@ -115,7 +120,8 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
             statusBannerMessage = tuple.a,
             pendingPnrTripId = tuple.b,
             pendingPnrSecondsRemaining = tuple.c,
-            showSmsPermissionRationale = tuple.d
+            showSmsPermissionRationale = tuple.d,
+            isNotificationAccessGranted = tuple.e
         )
     }.stateIn(
         scope = viewModelScope,
@@ -123,12 +129,13 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
         initialValue = HomeTripsUiState()
     )
 
-    private data class Tuple4<A, B, C, D>(val a: A, val b: B, val c: C, val d: D)
+    private data class Tuple5<A, B, C, D, E>(val a: A, val b: B, val c: C, val d: D, val e: E)
 
     init {
         WidgetRefreshScheduler.scheduleAll(application)
         TripNotificationScheduler.ensureNotificationChannel(application)
-        SmsStatusReceiver.ensurePnrNotificationChannel(application)
+        PnrReplyListenerService.ensurePnrNotificationChannel(application)
+        refreshNotificationAccessStatus()
 
         // Observe settings to sync periodic PNR worker
         viewModelScope.launch {
@@ -140,6 +147,11 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
                 }
             }
         }
+    }
+
+    fun refreshNotificationAccessStatus() {
+        _isNotificationAccessGranted.value =
+            PnrReplyListenerService.isNotificationListenerGranted(getApplication())
     }
 
     fun navigateTo(destination: ScreenDestination) {
@@ -185,7 +197,7 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
 
     // --- PNR Status SMS Checking ---
 
-    fun checkPnrStatusViaSms(trip: Trip) {
+    fun checkPnrStatusViaSms(trip: Trip, onLaunchPrefilledIntent: ((Intent) -> Unit)? = null) {
         viewModelScope.launch {
             val pnrDigits = trip.cleanPnr()
             if (pnrDigits.length != 10) {
@@ -193,16 +205,33 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
                 return@launch
             }
 
-            when (val sendResult = SmsStatusSender.sendPnrStatusCheck(getApplication(), trip, isManualTrigger = true)) {
-                is SmsSendResult.PermissionDenied -> {
-                    _showSmsPermissionRationale.value = true
-                }
-                is SmsSendResult.Error -> {
-                    _statusBannerMessage.value = "SMS SEND FAILED: ${sendResult.message}"
-                }
-                is SmsSendResult.Success -> {
+            val settings = settingsRepository.getSettingsSnapshot()
+            val dispatchResult = PnrStatusSender.dispatchCheck(
+                context = getApplication(),
+                trip = trip,
+                autoSendRequested = settings.autoSendSms,
+                isManualTrigger = true
+            )
+
+            when (dispatchResult) {
+                is PnrCheckDispatchResult.AutoSent -> {
                     _statusBannerMessage.value = "SENT 'PNR $pnrDigits' TO 139 // WAITING FOR REPLY..."
                     startPnrTimeoutCountdown(trip.id)
+                }
+                is PnrCheckDispatchResult.PrefilledIntent -> {
+                    _statusBannerMessage.value = "OPENING SMS DRAFT // TAP SEND TO 139"
+                    if (onLaunchPrefilledIntent != null) {
+                        onLaunchPrefilledIntent(dispatchResult.intent)
+                    } else {
+                        dispatchResult.intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                        runCatching {
+                            getApplication<Application>().startActivity(dispatchResult.intent)
+                        }
+                    }
+                    startPnrTimeoutCountdown(trip.id)
+                }
+                is PnrCheckDispatchResult.Error -> {
+                    _statusBannerMessage.value = "SMS DISPATCH FAILED: ${dispatchResult.message}"
                 }
             }
         }
@@ -478,6 +507,12 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
     fun setShowCheckForConfirmed(enabled: Boolean) {
         viewModelScope.launch {
             settingsRepository.setShowCheckForConfirmed(enabled)
+        }
+    }
+
+    fun setAutoSendSms(enabled: Boolean) {
+        viewModelScope.launch {
+            settingsRepository.setAutoSendSms(enabled)
         }
     }
 

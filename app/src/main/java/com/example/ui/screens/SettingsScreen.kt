@@ -1,13 +1,16 @@
 package com.example.ui.screens
 
 import android.Manifest
+import android.content.Intent
 import android.content.pm.PackageManager
 import android.os.Build
+import android.provider.Settings
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -23,15 +26,17 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.DeleteForever
-import androidx.compose.material.icons.outlined.DeleteSweep
 import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.Message
 import androidx.compose.material.icons.outlined.NotificationsActive
 import androidx.compose.material.icons.outlined.Refresh
+import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -63,9 +68,11 @@ import com.example.data.AppSettings
 import com.example.ui.components.NothingCard
 import com.example.ui.components.PerforatedDivider
 import com.example.ui.theme.DotoFontFamily
+import com.example.ui.theme.StatusUnknownGrey
 import com.example.ui.theme.NothingRed
 import com.example.ui.theme.NothingWhite
 import com.example.ui.theme.SpaceGroteskFontFamily
+import com.example.ui.theme.StatusConfirmedGreen
 import java.time.Instant
 import java.time.ZoneId
 import java.time.format.DateTimeFormatter
@@ -75,6 +82,7 @@ fun SettingsScreen(
     settings: AppSettings,
     totalTripCount: Int,
     widgetTripCount: Int,
+    isNotificationAccessGranted: Boolean,
     onBack: () -> Unit,
     onToggleDayBefore: (Boolean) -> Unit,
     onToggleTwoHoursBefore: (Boolean) -> Unit,
@@ -82,6 +90,7 @@ fun SettingsScreen(
     onToggleAutoCheckPnr: (Boolean) -> Unit,
     onToggleCheckInFinal24Hours: (Boolean) -> Unit,
     onToggleShowCheckConfirmed: (Boolean) -> Unit,
+    onToggleAutoSendSms: (Boolean) -> Unit,
     onClearPnrHistory: () -> Unit,
     onRefreshWidgetNow: () -> Unit,
     onDeleteAllData: () -> Unit,
@@ -92,17 +101,15 @@ fun SettingsScreen(
     val context = LocalContext.current
     var showDeleteAllDialog by remember { mutableStateOf(false) }
     var showClearHistoryDialog by remember { mutableStateOf(false) }
+    var showSendSmsRationaleDialog by remember { mutableStateOf(false) }
 
-    var hasSmsPermissions by remember {
-        val sendGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.SEND_SMS
-        ) == PackageManager.PERMISSION_GRANTED
-        val receiveGranted = ContextCompat.checkSelfPermission(
-            context,
-            Manifest.permission.RECEIVE_SMS
-        ) == PackageManager.PERMISSION_GRANTED
-        mutableStateOf(sendGranted && receiveGranted)
+    var hasSendSmsPermission by remember {
+        mutableStateOf(
+            ContextCompat.checkSelfPermission(
+                context,
+                Manifest.permission.SEND_SMS
+            ) == PackageManager.PERMISSION_GRANTED
+        )
     }
 
     var hasNotificationPermission by remember {
@@ -118,17 +125,60 @@ fun SettingsScreen(
         )
     }
 
-    val smsPermissionsLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        hasSmsPermissions = (results[Manifest.permission.SEND_SMS] == true) &&
-            (results[Manifest.permission.RECEIVE_SMS] == true)
+    val sendSmsPermissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestPermission()
+    ) { granted ->
+        hasSendSmsPermission = granted
+        if (granted) {
+            onToggleAutoSendSms(true)
+        } else {
+            onToggleAutoSendSms(false)
+        }
     }
 
     val notificationPermissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestPermission()
     ) { granted ->
         hasNotificationPermission = granted
+    }
+
+    if (showSendSmsRationaleDialog) {
+        AlertDialog(
+            onDismissRequest = { showSendSmsRationaleDialog = false },
+            title = {
+                Text(
+                    text = "SEND_SMS PERMISSION",
+                    fontFamily = DotoFontFamily,
+                    fontWeight = FontWeight.Bold
+                )
+            },
+            text = {
+                Text(
+                    text = "Enabling 'Send automatically' uses SEND_SMS to send 'PNR <PNR>' directly to 139 without opening the Messages app. All replies are read strictly offline.",
+                    fontFamily = SpaceGroteskFontFamily
+                )
+            },
+            confirmButton = {
+                TextButton(
+                    onClick = {
+                        showSendSmsRationaleDialog = false
+                        sendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
+                    }
+                ) {
+                    Text(
+                        text = "GRANT PERMISSION",
+                        fontFamily = DotoFontFamily,
+                        fontWeight = FontWeight.Bold,
+                        color = NothingRed
+                    )
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showSendSmsRationaleDialog = false }) {
+                    Text(text = "CANCEL", fontFamily = DotoFontFamily)
+                }
+            }
+        )
     }
 
     if (showDeleteAllDialog) {
@@ -186,7 +236,7 @@ fun SettingsScreen(
             },
             text = {
                 Text(
-                    text = "This removes all past SMS check logs from the local database. Trip current statuses will remain unchanged.",
+                    text = "This removes all past 139 check logs and debugging raw replies from the local database. Trip current statuses will remain unchanged.",
                     fontFamily = SpaceGroteskFontFamily
                 )
             },
@@ -267,7 +317,7 @@ fun SettingsScreen(
                                     color = MaterialTheme.colorScheme.onBackground
                                 )
                                 Text(
-                                    text = "NOTHING OS // OFFLINE PRIVACY MODE",
+                                    text = "NOTHING OS // 100% OFFLINE PRIVACY",
                                     fontFamily = DotoFontFamily,
                                     fontSize = 11.sp,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -277,7 +327,7 @@ fun SettingsScreen(
                     }
                 }
 
-                // 10. PNR LIVE STATUS CHECKING (139 SMS)
+                // 1. PNR LIVE STATUS CHECKING (139 SMS & Notification Listener)
                 item {
                     NothingCard {
                         Row(
@@ -290,7 +340,7 @@ fun SettingsScreen(
                                 tint = NothingRed
                             )
                             Text(
-                                text = "139 SMS PNR STATUS CHECKER",
+                                text = "139 PNR STATUS CHECKER",
                                 fontFamily = DotoFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
@@ -300,57 +350,92 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Sends 'PNR <PNR>' to Indian Railways 139 service and auto-reads replies. Strictly offline with zero internet access.",
+                            text = "Sends 'PNR <PNR>' to Indian Railways 139 service. The app automatically reads replies posted by your Messages app via Notification Listener Service. Strictly offline.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
 
-                        // 9. Permissions rationale screen / card
-                        if (!hasSmsPermissions) {
-                            Spacer(modifier = Modifier.height(12.dp))
-                            Box(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .clip(RoundedCornerShape(12.dp))
-                                    .background(MaterialTheme.colorScheme.surfaceVariant)
-                                    .padding(12.dp)
-                            ) {
-                                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Spacer(modifier = Modifier.height(12.dp))
+
+                        // Notification Listener Access Status Badge & Button
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .clip(RoundedCornerShape(12.dp))
+                                .background(MaterialTheme.colorScheme.surfaceVariant)
+                                .padding(12.dp)
+                        ) {
+                            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
                                     Text(
-                                        text = "SMS PERMISSION REQUIRED FOR 139 CHECKS",
+                                        text = "NOTIFICATION ACCESS",
                                         fontFamily = DotoFontFamily,
                                         fontWeight = FontWeight.Bold,
                                         fontSize = 12.sp,
-                                        color = NothingRed
-                                    )
-                                    Text(
-                                        text = "TravelTrack uses SEND_SMS and RECEIVE_SMS strictly to communicate with 139 for PNR status. Messages from all other phone numbers are completely ignored and never read. Sideloaded app mode.",
-                                        style = MaterialTheme.typography.bodySmall,
                                         color = MaterialTheme.colorScheme.onSurface
                                     )
-                                    OutlinedButton(
-                                        onClick = {
-                                            smsPermissionsLauncher.launch(
-                                                arrayOf(
-                                                    Manifest.permission.SEND_SMS,
-                                                    Manifest.permission.RECEIVE_SMS,
-                                                    Manifest.permission.READ_SMS
+
+                                    // Badge
+                                    Row(verticalAlignment = Alignment.CenterVertically) {
+                                        Box(
+                                            modifier = Modifier
+                                                .size(8.dp)
+                                                .clip(CircleShape)
+                                                .background(
+                                                    if (isNotificationAccessGranted) StatusConfirmedGreen else StatusUnknownGrey
                                                 )
-                                            )
-                                        },
-                                        shape = RoundedCornerShape(10.dp),
-                                        modifier = Modifier
-                                            .fillMaxWidth()
-                                            .testTag("grant_sms_permissions_button")
-                                    ) {
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
                                         Text(
-                                            text = "GRANT SMS PERMISSIONS",
+                                            text = if (isNotificationAccessGranted) "ENABLED" else "NOT ENABLED",
                                             fontFamily = DotoFontFamily,
                                             fontWeight = FontWeight.Bold,
-                                            fontSize = 12.sp,
-                                            color = NothingRed
+                                            fontSize = 11.sp,
+                                            color = if (isNotificationAccessGranted) StatusConfirmedGreen else StatusUnknownGrey
                                         )
                                     }
+                                }
+
+                                Text(
+                                    text = if (isNotificationAccessGranted) {
+                                        "Access granted. TravelTrack reads incoming 139 notifications and updates your ticket status automatically."
+                                    } else {
+                                        "Required to read 139 replies automatically from your messaging app notification without requesting SMS read permissions."
+                                    },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                OutlinedButton(
+                                    onClick = {
+                                        val intent = Intent(Settings.ACTION_NOTIFICATION_LISTENER_SETTINGS).apply {
+                                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+                                        }
+                                        runCatching { context.startActivity(intent) }
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .testTag("open_notification_access_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Settings,
+                                        contentDescription = null,
+                                        tint = if (isNotificationAccessGranted) MaterialTheme.colorScheme.onSurface else NothingRed,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = if (isNotificationAccessGranted) "MANAGE NOTIFICATION ACCESS" else "ENABLE NOTIFICATION ACCESS",
+                                        fontFamily = DotoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = if (isNotificationAccessGranted) MaterialTheme.colorScheme.onSurface else NothingRed
+                                    )
                                 }
                             }
                         }
@@ -359,8 +444,27 @@ fun SettingsScreen(
                         PerforatedDivider()
                         Spacer(modifier = Modifier.height(8.dp))
 
-                        // 9. If denied, hide the auto-check toggle and keep manual entry available
-                        if (hasSmsPermissions) {
+                        // Auto-send toggle
+                        SettingToggleRow(
+                            title = "Send automatically via SMS",
+                            subtitle = "Sends SMS directly using SmsManager instead of opening a draft (requires SEND_SMS permission)",
+                            checked = settings.autoSendSms,
+                            onCheckedChange = { enable ->
+                                if (enable) {
+                                    if (hasSendSmsPermission) {
+                                        onToggleAutoSendSms(true)
+                                    } else {
+                                        showSendSmsRationaleDialog = true
+                                    }
+                                } else {
+                                    onToggleAutoSendSms(false)
+                                }
+                            },
+                            testTag = "toggle_auto_send_sms"
+                        )
+
+                        // Auto-check toggle: HIDDEN if notification access is NOT granted
+                        if (isNotificationAccessGranted) {
                             SettingToggleRow(
                                 title = "Auto check PNR status",
                                 subtitle = "Periodic WorkManager check every 6 hours for waitlisted trains within 5 days",
@@ -386,7 +490,7 @@ fun SettingsScreen(
                             )
                         } else {
                             Text(
-                                text = "Auto-check is disabled because SMS permissions are not granted. You can still update statuses manually from the trip detail screen.",
+                                text = "Auto-check toggle is hidden until Notification Access is enabled above, so replies can be captured automatically.",
                                 style = MaterialTheme.typography.bodySmall,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 modifier = Modifier.padding(vertical = 4.dp)
@@ -395,7 +499,7 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 10. Clear PNR check history button
+                        // Clear PNR check history button
                         OutlinedButton(
                             onClick = { showClearHistoryDialog = true },
                             shape = RoundedCornerShape(12.dp),

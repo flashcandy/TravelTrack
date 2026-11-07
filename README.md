@@ -2,16 +2,18 @@
 
 **TravelTrack** is an offline-first Android application built in Kotlin with **Jetpack Compose**, **Room**, **WorkManager**, **PdfBox-Android**, **ML Kit Text Recognition**, and **Jetpack Glance** (`androidx.glance:glance-appwidget`). It extracts train and bus trip details from uploaded or shared tickets (`PDF`, `JPG`, `PNG`), normalizes dates and times to ISO 8601 (`yyyy-MM-dd` / `HH:mm`), stores them locally on the device, and surfaces upcoming trips in the next 5 days on a Nothing OS styled home screen widget.
 
-It also supports **live PNR status checking via SMS to 139** for waitlisted and RAC Indian Railways train tickets with automatic reply parsing and widget updates.
+It also supports **live PNR status checking via 139** for waitlisted and RAC Indian Railways train tickets with automatic notification reply reading and widget updates.
 
 ---
 
-## Permissions & Sideloading Notice
+## Permissions & Offline Architecture
 
-> **Important**: `SEND_SMS` and `RECEIVE_SMS` are sensitive permissions restricted under Google Play Developer Program policies. TravelTrack is designed for **personal, sideloaded APK use**. 
-> - SMS is used exclusively to dispatch `PNR <10-digit PNR>` to `139` and read incoming status replies within a 3-minute timeout window.
-> - Messages from all other phone numbers and senders are strictly ignored and never read.
-> - The application has zero internet access (the `INTERNET` permission is completely stripped). All ticket data, passenger names, and check history remain strictly on your device.
+> **Privacy & Permissions Boundary**:
+> - **Zero SMS Permissions by Default**: The primary method opens your device's default SMS app with a prefilled message via `smsto:139` with `sms_body = "PNR <10-digit PNR>"`. The user taps Send in their trusted messaging app. No SMS permissions are required.
+> - **No `RECEIVE_SMS` or `READ_SMS`**: TravelTrack does **not** declare or request `RECEIVE_SMS` or `READ_SMS`.
+> - **Notification Listener Service (`PnrReplyListenerService`)**: Reads incoming status replies posted by your device's Messages app. Only notifications identifying sender `139` matching an active pending check from the last 3 minutes are processed. All other notifications are immediately ignored without being stored or inspected.
+> - **Optional `SEND_SMS` (Settings)**: For users wanting background auto-checks, an optional "Send automatically via SMS" switch can be toggled in Settings to dispatch via `SmsManager`. If denied, it falls back to the prefilled intent.
+> - **100% Offline (No Internet)**: The `INTERNET` permission is completely stripped. All ticket data, passenger records, and check logs remain strictly local to your device.
 
 ---
 
@@ -19,31 +21,31 @@ It also supports **live PNR status checking via SMS to 139** for waitlisted and 
 
 ```text
 app/src/main/
-├── AndroidManifest.xml                     # Offline manifest, ACTION_SEND filters, SMS receivers, Glance & Alarm receivers
+├── AndroidManifest.xml                     # Offline manifest, NotificationListenerService, Glance & Alarm receivers
 ├── java/com/example/
-│   ├── MainActivity.kt                     # Edge-to-edge activity, ACTION_SEND handler, widget deep-link router
+│   ├── MainActivity.kt                     # Edge-to-edge activity, ACTION_SEND handler, notification access check on resume
 │   ├── data/
 │   │   ├── Trip.kt                         # Room Entity (paise amount, ISO date/time, currentStatus, lastCheckedAt, PnrStatusCategory)
-│   │   ├── TripDao.kt                      # Reactive Flow queries, status updates & duplicate reference lookup
-│   │   ├── PnrStatusCheck.kt               # Entity logging PNR check attempts, replies, and timestamps
+│   │   ├── TripDao.kt                      # Reactive Flow queries, status updates & clearAllRawReplies
+│   │   ├── PnrStatusCheck.kt               # Entity logging PNR check attempts, method ("PREFILLED_SMS" / "AUTO_SMS"), timestamps
 │   │   ├── PnrStatusCheckDao.kt            # DAO for pending check lookups, history, and cleanups
-│   │   ├── AppDatabase.kt                  # Room database singleton with MIGRATION_1_2
+│   │   ├── AppDatabase.kt                  # Room database with MIGRATION_1_2, MIGRATION_2_3, and MIGRATION_3_4
 │   │   ├── TripFilter.kt                   # Pure 5-day widget window filter & Upcoming/Past partitioning
 │   │   ├── TripRepository.kt               # Repository with duplicate reference detection & PNR check logging
-│   │   └── SettingsRepository.kt           # DataStore Preferences for notification toggles, theme, & auto-check PNR
+│   │   └── SettingsRepository.kt           # DataStore Preferences for notification toggles, theme, auto-check, & auto-send
 │   ├── parser/
 │   │   ├── TicketExtractionModels.kt       # ParsedTicketDraft, ConfidenceLevel, TicketFormat
 │   │   ├── DateTimeNormalizer.kt           # Normalizes dates to yyyy-MM-dd, times to 24h HH:mm, amounts to paise
-│   │   ├── LabelValueExtractor.kt          # Label-based value extractor (same line or next line, position-independent)
-│   │   ├── IrctcTicketParser.kt            # IRCTC Electronic Reservation Slip parser
+│   │   ├── LabelValueExtractor.kt          # Label-based value extractor (same line or next line, bounded by known labels)
+│   │   ├── IrctcTicketParser.kt            # IRCTC Electronic Reservation Slip parser with structured Passenger table parsing
 │   │   ├── RedBusTicketParser.kt           # redBus / TSRTC bus ticket parser
 │   │   ├── UnknownTicketParser.kt          # Unknown ticket fallback + TicketParserRouter
 │   │   ├── TicketDocumentExtractor.kt      # PdfBox-Android text layer + PdfRenderer & ML Kit OCR fallback
 │   │   └── SampleTickets.kt                # Sample IRCTC & redBus ticket texts
 │   ├── sms/
-│   │   ├── PnrReplyParser.kt               # 139 SMS reply parser (PNR, status tokens, chart prepared, cancelled)
-│   │   ├── SmsStatusSender.kt              # Dispatches "PNR <PNR>" to 139 via SmsManager with 10-digit validation
-│   │   ├── SmsStatusReceiver.kt            # SMS_RECEIVED BroadcastReceiver filtering sender 139 within 3-min timeout
+│   │   ├── PnrReplyParser.kt               # 139 reply parser (strict status tokens, last 4 digits matching, isSender139 check)
+│   │   ├── PnrStatusSender.kt              # Prefilled SMS intent ("smsto:139") and optional SmsManager dispatch
+│   │   ├── PnrReplyListenerService.kt      # NotificationListenerService reading 139 replies with 3-min timeout
 │   │   └── PnrStatusWorker.kt              # WorkManager periodic check (every 6h; every 2h in final 24h)
 │   ├── widget/
 │   │   ├── TravelTrackWidget.kt            # GlanceAppWidget with 4-state dot colors (Green/Amber/Red/Grey) and last checked text
@@ -62,8 +64,8 @@ app/src/main/
 │       │   ├── HomeScreen.kt               # Upcoming & Past list, live widget preview toggle, red '+' FAB
 │       │   ├── AddTicketScreen.kt          # PDF/JPG/PNG picker, share info, & sample parser bench
 │       │   ├── ReviewTicketScreen.kt       # Editable form with per-field confidence hints & raw text viewer
-│       │   ├── TripDetailScreen.kt         # Boarding pass, "Check PNR status" (139 SMS), manual update dialog, debug raw reply
-│       │   └── SettingsScreen.kt           # SMS rationale, auto-check toggles, clear history, widget sync info, theme toggle
+│       │   ├── TripDetailScreen.kt         # Boarding pass, "Check PNR status" (139 SMS), manual update dialog, masked PNR
+│       │   └── SettingsScreen.kt           # Notification Access badge & button, auto-check, auto-send, clear history
 │       └── theme/
 │           ├── Color.kt                    # Monochrome #000000/#111111 + Nothing Red #D71921
 │           ├── Type.kt                     # Bundled Doto (dot-matrix display) & Space Grotesk (body/labels)
@@ -84,48 +86,25 @@ app/src/main/
    ```bash
    gradle assembleDebug
    ```
-2. **Run Unit & Robolectric Tests (Parsers, 139 SMS Reply Parser, Date/Time Normalizer, 5-Day Widget Filter, UI)**:
+2. **Run Unit & Robolectric Tests (Parsers, 139 Reply Fixtures, Date/Time Normalizer, 5-Day Widget Filter, UI)**:
    ```bash
    gradle :app:testDebugUnitTest
    ```
 
 ---
 
-## Testing the Parser with a Real 139 SMS Reply
+## Testing with Fixtures and Real 139 Replies
 
-When Indian Railways 139 replies to your SMS query, you can verify and expand parser test cases:
+Test fixtures are stored under `app/src/test/resources/fixtures/`:
+- `reply_confirmed.txt`
+- `reply_rac.txt`
+- `reply_waitlisted_rlwl28.txt`
+- `reply_chart_prepared.txt`
+- `reply_cancelled.txt`
+- `reply_unrecognised.txt`
+- `reply_other_sender.txt`
 
-1. On the **Trip Detail** screen, if an SMS reply was received, the full unmodified text appears under **LAST 139 SMS REPLY (DEBUG)**.
-2. Long-press or copy the raw SMS reply text.
-3. Open `app/src/test/java/com/example/PnrReplyParserTest.kt`.
-4. Add a test case with your real reply:
-   ```kotlin
-   @Test
-   fun `parse real 139 SMS reply`() {
-       val realReply = "PASTE_YOUR_RAW_REPLY_HERE"
-       val result = PnrReplyParser.parse(realReply)
-
-       assertEquals("YOUR_10_DIGIT_PNR", result.pnr)
-       assertEquals("EXPECTED_STATUS_TOKEN", result.extractedStatus) // e.g. "CNF/B2/31", "RAC/12", "WL/3"
-       assertTrue(result.isSuccess)
-   }
-   ```
-5. Run the test suite:
-   ```bash
-   gradle :app:testDebugUnitTest
-   ```
-
----
-
-## How to Add a New Ticket Format
-
-TravelTrack uses a modular, label-driven parser architecture in `com.example.parser`:
-
-1. **Create a New Parser Class** in `app/src/main/java/com/example/parser/`:
-   - Define a list of `KNOWN_LABELS` that appear on the ticket.
-   - Implement `fun canParse(text: String): Boolean` to detect the ticket type by header keywords or distinctive labels.
-   - Implement `fun parse(text: String): ParsedTicketDraft`:
-     - Use `LabelValueExtractor.extractValueByLabel(text, targetLabels, KNOWN_LABELS)` to find each field by its label on the same line or the next line without relying on text coordinates.
-     - Normalize dates with `DateTimeNormalizer.normalizeDate(raw)` (`yyyy-MM-dd`), times with `DateTimeNormalizer.normalizeTime(raw)` (`HH:mm`), and fares with `DateTimeNormalizer.parseAmountToPaise(raw)`.
-2. **Register the Parser in `TicketParserRouter.kt`** (inside `UnknownTicketParser.kt`).
-3. **Add Unit Tests** in `app/src/test/java/com/example/ExampleUnitTest.kt`.
+When you receive a real reply from 139:
+1. On the **Trip Detail** screen, view the raw text under **LAST 139 SMS REPLY (DEBUG)**.
+2. Add a new fixture file in `src/test/resources/fixtures/`.
+3. Assert on the last 4 digits of the PNR and verify the status token extraction in `PnrReplyParserTest.kt`.

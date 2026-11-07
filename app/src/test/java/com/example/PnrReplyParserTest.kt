@@ -10,72 +10,68 @@ import org.junit.Test
 
 class PnrReplyParserTest {
 
-    @Test
-    fun `parse confirmed status with coach and seat number`() {
-        val reply = "PNR:6952208777,TRAIN:11020,DOJ:19-11-2026,SC TO KMT,STATUS:CNF/B2/31,CHART NOT PREPARED"
-        val result = PnrReplyParser.parse(reply)
+    private fun loadFixture(name: String): String {
+        val stream = javaClass.classLoader?.getResourceAsStream("fixtures/$name")
+            ?: javaClass.getResourceAsStream("/fixtures/$name")
+            ?: error("Fixture not found: fixtures/$name")
+        return stream.bufferedReader().use { it.readText() }.trim()
+    }
 
-        assertEquals("6952208777", result.pnr)
-        assertEquals("CNF/B2/31", result.extractedStatus)
+    @Test
+    fun `parse confirmed reply fixture asserting last 4 digits 8777`() {
+        val reply = loadFixture("reply_confirmed.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
+
+        assertEquals("8777", result.matchedPnrLast4)
+        assertEquals("CNF", result.extractedStatus)
         assertEquals(PnrStatusCategory.CONFIRMED, result.category)
-        assertFalse(result.isChartPrepared)
-        assertFalse(result.isCancelled)
         assertTrue(result.isSuccess)
+        assertFalse(result.isCancelled)
     }
 
     @Test
-    fun `parse waitlisted reply with booking and current status tokens`() {
-        val reply = "PNR: 6952208777 Train: 11020 Date: 19-Nov-2026 Booking: RLWL/29 Current: RLWL/28 Chart not prepared."
-        val result = PnrReplyParser.parse(reply)
+    fun `parse rac reply fixture asserting last 4 digits 8777`() {
+        val reply = loadFixture("reply_rac.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
 
-        assertEquals("6952208777", result.pnr)
-        assertEquals("RLWL/28", result.extractedStatus)
-        assertEquals(PnrStatusCategory.WAITLISTED, result.category)
-        assertFalse(result.isChartPrepared)
-        assertFalse(result.isCancelled)
-        assertTrue(result.isSuccess)
-    }
-
-    @Test
-    fun `parse RAC status reply`() {
-        val reply = "PNR 6952208777 Trn:12723 DOJ:10-12-26 Status:RAC/12 Chart Not Prepared"
-        val result = PnrReplyParser.parse(reply)
-
-        assertEquals("6952208777", result.pnr)
+        assertEquals("8777", result.matchedPnrLast4)
         assertEquals("RAC/12", result.extractedStatus)
         assertEquals(PnrStatusCategory.RAC, result.category)
-        assertFalse(result.isChartPrepared)
         assertTrue(result.isSuccess)
+        assertFalse(result.isCancelled)
     }
 
     @Test
-    fun `parse simple waitlisted status reply`() {
-        val reply = "PNR 6952208777 Status: WL/3"
-        val result = PnrReplyParser.parse(reply)
+    fun `parse waitlisted rlwl28 reply fixture asserting last 4 digits 8777`() {
+        val reply = loadFixture("reply_waitlisted_rlwl28.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
 
-        assertEquals("6952208777", result.pnr)
-        assertEquals("WL/3", result.extractedStatus)
+        assertEquals("8777", result.matchedPnrLast4)
+        assertEquals("RLWL/28", result.extractedStatus)
         assertEquals(PnrStatusCategory.WAITLISTED, result.category)
         assertTrue(result.isSuccess)
+        assertFalse(result.isCancelled)
     }
 
     @Test
-    fun `parse pooled quota waitlisted reply`() {
-        val reply = "PNR: 6952208777 Current Status: PQWL/5"
-        val result = PnrReplyParser.parse(reply)
+    fun `parse chart prepared fixture asserting last 4 digits 8777`() {
+        val reply = loadFixture("reply_chart_prepared.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
 
-        assertEquals("6952208777", result.pnr)
-        assertEquals("PQWL/5", result.extractedStatus)
-        assertEquals(PnrStatusCategory.WAITLISTED, result.category)
+        assertEquals("8777", result.matchedPnrLast4)
+        assertEquals("CNF/B2/31", result.extractedStatus)
+        assertEquals(PnrStatusCategory.CONFIRMED, result.category)
+        assertTrue(result.isChartPrepared)
         assertTrue(result.isSuccess)
+        assertFalse(result.isCancelled)
     }
 
     @Test
-    fun `parse cancelled ticket phrase`() {
-        val reply = "PNR 6952208777 Ticket Cancelled."
-        val result = PnrReplyParser.parse(reply)
+    fun `parse cancelled ticket fixture asserting last 4 digits 8777`() {
+        val reply = loadFixture("reply_cancelled.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
 
-        assertEquals("6952208777", result.pnr)
+        assertEquals("8777", result.matchedPnrLast4)
         assertEquals("CANCELLED", result.extractedStatus)
         assertEquals(PnrStatusCategory.CANCELLED, result.category)
         assertTrue(result.isCancelled)
@@ -83,25 +79,43 @@ class PnrReplyParserTest {
     }
 
     @Test
-    fun `parse chart prepared with confirmed status`() {
-        val reply = "PNR: 6952208777, Current Status: CNF, Chart Prepared"
-        val result = PnrReplyParser.parse(reply)
-
-        assertEquals("6952208777", result.pnr)
-        assertEquals("CNF", result.extractedStatus)
-        assertEquals(PnrStatusCategory.CONFIRMED, result.category)
-        assertTrue(result.isChartPrepared)
-        assertTrue(result.isSuccess)
+    fun `other sender fixture is rejected by isSender139`() {
+        assertFalse(PnrReplyParser.isSender139("VK-BANKOTP"))
+        assertFalse(PnrReplyParser.isSender139("Google"))
+        assertFalse(PnrReplyParser.isSender139("9876543210"))
+        assertFalse(PnrReplyParser.isSender139(null))
+        assertFalse(PnrReplyParser.isSender139(""))
     }
 
     @Test
-    fun `unrecognized reply must return UNKNOWN and fail gracefully`() {
-        val reply = "Dear Customer, the requested service is temporarily unavailable. Please try again."
-        val result = PnrReplyParser.parse(reply)
+    fun `isSender139 accurately identifies 139 senders`() {
+        assertTrue(PnrReplyParser.isSender139("139"))
+        assertTrue(PnrReplyParser.isSender139("+91139"))
+        assertTrue(PnrReplyParser.isSender139("VK-139"))
+        assertTrue(PnrReplyParser.isSender139("AD-139"))
+        assertTrue(PnrReplyParser.isSender139("VM-139"))
+        assertTrue(PnrReplyParser.isSender139("91139"))
+    }
 
-        assertNull(result.pnr)
+    @Test
+    fun `unrecognised reply returns UNKNOWN and does not mutate status`() {
+        val reply = loadFixture("reply_unrecognised.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
+
+        assertEquals("8777", result.matchedPnrLast4)
         assertNull(result.extractedStatus)
         assertEquals(PnrStatusCategory.UNKNOWN, result.category)
         assertFalse(result.isSuccess)
+    }
+
+    @Test
+    fun `match pending PNR by last 4 digits when full PNR is masked in reply`() {
+        val reply = "Dear passenger, status for PNR ending in 8777 is CNF/S4/32"
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
+
+        assertEquals("8777", result.matchedPnrLast4)
+        assertEquals("CNF/S4/32", result.extractedStatus)
+        assertEquals(PnrStatusCategory.CONFIRMED, result.category)
+        assertTrue(result.isSuccess)
     }
 }

@@ -53,10 +53,11 @@ class MainActivity : ComponentActivity() {
             val uiState by viewModel.uiState.collectAsStateWithLifecycle()
             val currentScreen by viewModel.currentScreen.collectAsStateWithLifecycle()
 
-            val smsPermissionLauncher = rememberLauncherForActivityResult(
-                contract = ActivityResultContracts.RequestMultiplePermissions()
-            ) {
+            val sendSmsPermissionLauncher = rememberLauncherForActivityResult(
+                contract = ActivityResultContracts.RequestPermission()
+            ) { granted ->
                 viewModel.showSmsRationale(false)
+                viewModel.setAutoSendSms(granted)
             }
 
             if (uiState.showSmsPermissionRationale) {
@@ -64,14 +65,14 @@ class MainActivity : ComponentActivity() {
                     onDismissRequest = { viewModel.showSmsRationale(false) },
                     title = {
                         Text(
-                            text = "SMS PERMISSION // 139 PNR STATUS",
+                            text = "SEND_SMS PERMISSION",
                             fontFamily = DotoFontFamily,
                             fontWeight = FontWeight.Bold
                         )
                     },
                     text = {
                         Text(
-                            text = "TravelTrack uses SMS exclusively to send 'PNR <10-digit PNR>' to 139 and automatically detect the reply on your device. Messages from any other phone numbers are completely ignored and no data leaves your phone.",
+                            text = "TravelTrack uses SEND_SMS exclusively to send 'PNR <10-digit PNR>' directly to 139 if you enable auto-sending. Without this permission, the app opens a prefilled message in your default SMS app.",
                             fontFamily = SpaceGroteskFontFamily
                         )
                     },
@@ -79,13 +80,7 @@ class MainActivity : ComponentActivity() {
                         TextButton(
                             onClick = {
                                 viewModel.showSmsRationale(false)
-                                smsPermissionLauncher.launch(
-                                    arrayOf(
-                                        Manifest.permission.SEND_SMS,
-                                        Manifest.permission.RECEIVE_SMS,
-                                        Manifest.permission.READ_SMS
-                                    )
-                                )
+                                sendSmsPermissionLauncher.launch(Manifest.permission.SEND_SMS)
                             }
                         ) {
                             Text(
@@ -111,6 +106,11 @@ class MainActivity : ComponentActivity() {
                 )
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        viewModel.refreshNotificationAccessStatus()
     }
 
     override fun onNewIntent(intent: Intent) {
@@ -229,6 +229,7 @@ fun TravelTrackAppContent(
                     settings = uiState.settings,
                     totalTripCount = uiState.allTrips.size,
                     widgetTripCount = uiState.widgetUpcomingTrips.size,
+                    isNotificationAccessGranted = uiState.isNotificationAccessGranted,
                     onBack = { viewModel.navigateBack() },
                     onToggleDayBefore = { viewModel.setNotifyDayBefore(it) },
                     onToggleTwoHoursBefore = { viewModel.setNotifyTwoHoursBefore(it) },
@@ -236,6 +237,7 @@ fun TravelTrackAppContent(
                     onToggleAutoCheckPnr = { viewModel.setAutoCheckPnr(it) },
                     onToggleCheckInFinal24Hours = { viewModel.setCheckInFinal24Hours(it) },
                     onToggleShowCheckConfirmed = { viewModel.setShowCheckForConfirmed(it) },
+                    onToggleAutoSendSms = { viewModel.setAutoSendSms(it) },
                     onClearPnrHistory = { viewModel.clearPnrCheckHistory() },
                     onRefreshWidgetNow = { viewModel.forceRefreshWidgetsNow() },
                     onDeleteAllData = { viewModel.deleteAllData() }

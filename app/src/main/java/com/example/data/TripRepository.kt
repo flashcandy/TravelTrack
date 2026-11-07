@@ -62,12 +62,14 @@ class TripRepository(
         tripId: Long,
         pnr: String,
         isManual: Boolean = false,
+        method: String = "PREFILLED_SMS",
         requestTimeMillis: Long = System.currentTimeMillis()
     ): Long {
         val check = PnrStatusCheck(
             tripId = tripId,
             pnr = pnr.filter { it.isDigit() },
             requestedAt = requestTimeMillis,
+            method = method,
             isManual = isManual
         )
         return pnrCheckDao.insertCheck(check)
@@ -80,6 +82,11 @@ class TripRepository(
         val digits = pnr.filter { it.isDigit() }
         val threshold = System.currentTimeMillis() - maxAgeMillis
         return pnrCheckDao.findPendingCheck(digits, threshold)
+    }
+
+    suspend fun getPendingChecks(maxAgeMillis: Long = 180_000L): List<PnrStatusCheck> {
+        val threshold = System.currentTimeMillis() - maxAgeMillis
+        return pnrCheckDao.getPendingChecks(threshold)
     }
 
     suspend fun updateTripPnrStatus(
@@ -154,5 +161,6 @@ class TripRepository(
 
     suspend fun clearPnrCheckHistory() {
         pnrCheckDao.deleteAllChecks()
+        tripDao.clearAllRawReplies()
     }
 }

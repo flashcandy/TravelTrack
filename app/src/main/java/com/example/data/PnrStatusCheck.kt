@@ -17,6 +17,7 @@ data class PnrStatusCheck(
     val tripId: Long,
     val pnr: String,
     val requestedAt: Long = System.currentTimeMillis(),
+    val method: String = "PREFILLED_SMS",
     val replyReceivedAt: Long? = null,
     val rawReply: String? = null,
     val parsedStatus: String? = null,
