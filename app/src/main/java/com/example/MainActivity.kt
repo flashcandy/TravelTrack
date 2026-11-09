@@ -219,6 +219,7 @@ fun TravelTrackAppContent(
                     onEditTrip = { viewModel.openEditTrip(it) },
                     onDeleteTrip = { viewModel.deleteTrip(it) },
                     onCheckPnrStatus = { viewModel.checkPnrStatusViaSms(it) },
+                    onCheckTelegramBot = { viewModel.checkPnrStatusViaTelegramBot(it) },
                     onCancelPendingCheck = { viewModel.cancelPendingPnrCheck() },
                     onUpdateStatusManually = { tripId, status -> viewModel.updateStatusManually(tripId, status) }
                 )

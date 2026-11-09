@@ -25,7 +25,25 @@ object PnrReplyParser {
         RegexOption.IGNORE_CASE
     )
 
-    // Checks sender title or address
+    // Explicit "Current Status:" label regex used by Telegram @check_pnr_status_bot and structured replies
+    private val CURRENT_STATUS_LABEL_REGEX = Regex(
+        """Current\s*Status\s*[:\-]\s*([A-Za-z0-9/\s]+?)(?:\r|\n|$|⏱|✅|❌|\uD83D|\u23F1)""",
+        RegexOption.IGNORE_CASE
+    )
+
+    // Known Telegram package names
+    private val TELEGRAM_PACKAGES = setOf(
+        "org.telegram.messenger",
+        "org.telegram.messenger.web",
+        "org.telegram.plus",
+        "tw.nekomimi.nekogram",
+        "ir.ilmili.telegraph",
+        "com.radolyn.ayugram",
+        "uz.unnarsx.cherrygram",
+        "org.thunderdog.challegram"
+    )
+
+    // Checks sender title or address for 139 SMS
     fun isSender139(sender: String?): Boolean {
         if (sender.isNullOrBlank()) return false
         val clean = sender.trim().replace(" ", "").uppercase(Locale.US)
@@ -35,7 +53,29 @@ object PnrReplyParser {
     }
 
     /**
-     * Parses the 139 SMS / Notification reply body.
+     * Checks if a notification is from Telegram's @check_pnr_status_bot or contains structured Telegram PNR bot markers.
+     */
+    fun isTelegramPnrBot(packageName: String?, senderTitle: String?, bodyText: String?): Boolean {
+        val lowerTitle = senderTitle?.trim()?.lowercase(Locale.US).orEmpty()
+        val lowerBody = bodyText?.trim()?.lowercase(Locale.US).orEmpty()
+
+        val titleMatchesBot = lowerTitle.contains("check_pnr_status_bot") ||
+            lowerTitle.contains("pnr status") ||
+            lowerTitle.contains("check pnr") ||
+            lowerTitle.contains("irctc pnr")
+
+        val bodyMatchesBotFormat = (lowerBody.contains("pnr:") || lowerBody.contains("🎟")) &&
+            (lowerBody.contains("booking status:") || lowerBody.contains("current status:") || lowerBody.contains("chartstatus:"))
+
+        if (titleMatchesBot) return true
+        if (packageName != null && TELEGRAM_PACKAGES.contains(packageName) && bodyMatchesBotFormat) {
+            return true
+        }
+        return bodyMatchesBotFormat
+    }
+
+    /**
+     * Parses a 139 SMS or @check_pnr_status_bot Telegram notification reply body.
      * Matches the PNR by 10 digits or by [pendingPnrLast4] of an active pending check.
      */
     fun parse(smsBody: String, pendingPnrLast4: String? = null): PnrParseResult {
@@ -50,8 +90,12 @@ object PnrReplyParser {
         }
 
         val lower = trimmed.lowercase(Locale.US)
-        val isCancelled = lower.contains("cancel") || lower.contains("cancelled") || lower.contains("canc")
-        val isChartPrepared = lower.contains("chart prepared") && !lower.contains("chart not prepared")
+        val isCancelled = lower.contains("ticket cancelled") ||
+            lower.contains("has been cancelled") ||
+            lower.contains("train cancelled") ||
+            Regex("""\bcancelled\b""", RegexOption.IGNORE_CASE).containsMatchIn(trimmed)
+        val isChartPrepared = (lower.contains("chart prepared") || lower.contains("chartstatus: chart prepared")) &&
+            !lower.contains("chart not prepared")
 
         if (isCancelled) {
             return PnrParseResult(
@@ -66,12 +110,18 @@ object PnrReplyParser {
             )
         }
 
-        // Find status tokens in the reply text
-        // If multiple tokens appear (e.g. Booking: RLWL/29 Cur: RLWL/28), the last one is Current Status
+        // 1. Check if there are explicit "Current Status: <token>" lines (e.g. from @check_pnr_status_bot)
+        val explicitCurrentMatches = CURRENT_STATUS_LABEL_REGEX.findAll(trimmed).mapNotNull { match ->
+            val rawVal = match.groupValues.getOrNull(1)?.trim().orEmpty()
+            STATUS_TOKEN_REGEX.find(rawVal)?.value?.trim()?.uppercase(Locale.US)
+        }.toList()
+
+        // 2. Fallback to all status tokens in the reply text
         val allMatches = STATUS_TOKEN_REGEX.findAll(trimmed).toList()
-        var candidateToken: String? = null
-        if (allMatches.isNotEmpty()) {
-            candidateToken = allMatches.last().value.trim().uppercase(Locale.US)
+        val candidateToken: String? = when {
+            explicitCurrentMatches.isNotEmpty() -> explicitCurrentMatches.first()
+            allMatches.isNotEmpty() -> allMatches.last().value.trim().uppercase(Locale.US)
+            else -> null
         }
 
         if (candidateToken == null && isChartPrepared) {

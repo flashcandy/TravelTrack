@@ -76,6 +76,7 @@ fun TripDetailScreen(
     onEditTrip: (Trip) -> Unit,
     onDeleteTrip: (Trip) -> Unit,
     onCheckPnrStatus: (Trip) -> Unit,
+    onCheckTelegramBot: (Trip) -> Unit = {},
     onCancelPendingCheck: () -> Unit,
     onUpdateStatusManually: (Long, String) -> Unit,
     modifier: Modifier = Modifier
@@ -282,7 +283,7 @@ fun TripDetailScreen(
                         }
                     }
 
-                    // 2. SMS SENDING: "Check PNR status" Button & Pending State
+                    // 2. LIVE PNR CHECKING: 139 SMS & Telegram Bot (@check_pnr_status_bot)
                     val canCheckPnr = trip.isPnrCheckEligible(allowConfirmed = showCheckForConfirmed)
                     if (canCheckPnr) {
                         item {
@@ -307,7 +308,7 @@ fun TripDetailScreen(
                                             )
                                             Column {
                                                 Text(
-                                                    text = "WAITING FOR 139 REPLY...",
+                                                    text = "WAITING FOR PNR REPLY...",
                                                     fontFamily = DotoFontFamily,
                                                     fontWeight = FontWeight.Bold,
                                                     fontSize = 14.sp,
@@ -316,7 +317,11 @@ fun TripDetailScreen(
                                                 val mins = pendingPnrSecondsRemaining / 60
                                                 val secs = pendingPnrSecondsRemaining % 60
                                                 Text(
-                                                    text = String.format("Timeout in %02d:%02d · auto-detecting SMS", mins, secs),
+                                                    text = String.format(
+                                                        "Timeout in %02d:%02d · listening for 139 SMS or @check_pnr_status_bot",
+                                                        mins,
+                                                        secs
+                                                    ),
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
@@ -335,50 +340,111 @@ fun TripDetailScreen(
                                         )
                                     }
                                 } else {
-                                    Row(
+                                    Column(
                                         modifier = Modifier.fillMaxWidth(),
-                                        horizontalArrangement = Arrangement.SpaceBetween,
-                                        verticalAlignment = Alignment.CenterVertically
+                                        verticalArrangement = Arrangement.spacedBy(12.dp)
                                     ) {
-                                        Column(modifier = Modifier.weight(1f)) {
-                                            Text(
-                                                text = "CHECK LIVE PNR STATUS (SMS 139)",
-                                                fontFamily = DotoFontFamily,
-                                                fontWeight = FontWeight.Bold,
-                                                fontSize = 13.sp,
-                                                color = MaterialTheme.colorScheme.onSurface
-                                            )
-                                            Text(
-                                                text = "Sends 'PNR ${trip.cleanPnr()}' to 139. Replies are parsed automatically 100% offline.",
-                                                style = MaterialTheme.typography.bodySmall,
-                                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                                            )
-                                        }
-                                        Spacer(modifier = Modifier.width(10.dp))
-                                        Box(
-                                            modifier = Modifier
-                                                .clip(RoundedCornerShape(12.dp))
-                                                .background(NothingRed)
-                                                .clickable { onCheckPnrStatus(trip) }
-                                                .padding(horizontal = 14.dp, vertical = 10.dp)
-                                                .testTag("check_pnr_status_button"),
-                                            contentAlignment = Alignment.Center
+                                        // Option A: 139 SMS Check
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
                                         ) {
-                                            Row(verticalAlignment = Alignment.CenterVertically) {
-                                                Icon(
-                                                    imageVector = Icons.Outlined.Send,
-                                                    contentDescription = null,
-                                                    tint = NothingWhite,
-                                                    modifier = Modifier.size(16.dp)
-                                                )
-                                                Spacer(modifier = Modifier.width(6.dp))
+                                            Column(modifier = Modifier.weight(1f)) {
                                                 Text(
-                                                    text = "CHECK 139",
+                                                    text = "CHECK LIVE PNR STATUS (SMS 139)",
                                                     fontFamily = DotoFontFamily,
                                                     fontWeight = FontWeight.Bold,
-                                                    fontSize = 12.sp,
-                                                    color = NothingWhite
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
                                                 )
+                                                Text(
+                                                    text = "Sends 'PNR ${trip.cleanPnr()}' to 139. Replies are parsed automatically 100% offline.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .background(NothingRed)
+                                                    .clickable { onCheckPnrStatus(trip) }
+                                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                                    .testTag("check_pnr_status_button"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Send,
+                                                        contentDescription = null,
+                                                        tint = NothingWhite,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "CHECK 139",
+                                                        fontFamily = DotoFontFamily,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp,
+                                                        color = NothingWhite
+                                                    )
+                                                }
+                                            }
+                                        }
+
+                                        PerforatedDivider()
+
+                                        // Option B: Telegram @check_pnr_status_bot Check
+                                        Row(
+                                            modifier = Modifier.fillMaxWidth(),
+                                            horizontalArrangement = Arrangement.SpaceBetween,
+                                            verticalAlignment = Alignment.CenterVertically
+                                        ) {
+                                            Column(modifier = Modifier.weight(1f)) {
+                                                Text(
+                                                    text = "TELEGRAM BOT (@check_pnr_status_bot)",
+                                                    fontFamily = DotoFontFamily,
+                                                    fontWeight = FontWeight.Bold,
+                                                    fontSize = 13.sp,
+                                                    color = MaterialTheme.colorScheme.onSurface
+                                                )
+                                                Text(
+                                                    text = "Copies PNR & opens @check_pnr_status_bot. Bot reply notification updates status automatically.",
+                                                    style = MaterialTheme.typography.bodySmall,
+                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                )
+                                            }
+                                            Spacer(modifier = Modifier.width(10.dp))
+                                            Box(
+                                                modifier = Modifier
+                                                    .clip(RoundedCornerShape(12.dp))
+                                                    .border(
+                                                        width = 1.dp,
+                                                        color = NothingRed,
+                                                        shape = RoundedCornerShape(12.dp)
+                                                    )
+                                                    .clickable { onCheckTelegramBot(trip) }
+                                                    .padding(horizontal = 14.dp, vertical = 10.dp)
+                                                    .testTag("check_telegram_bot_button"),
+                                                contentAlignment = Alignment.Center
+                                            ) {
+                                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                                    Icon(
+                                                        imageVector = Icons.Outlined.Message,
+                                                        contentDescription = null,
+                                                        tint = NothingRed,
+                                                        modifier = Modifier.size(16.dp)
+                                                    )
+                                                    Spacer(modifier = Modifier.width(6.dp))
+                                                    Text(
+                                                        text = "TELEGRAM BOT",
+                                                        fontFamily = DotoFontFamily,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 12.sp,
+                                                        color = NothingRed
+                                                    )
+                                                }
                                             }
                                         }
                                     }

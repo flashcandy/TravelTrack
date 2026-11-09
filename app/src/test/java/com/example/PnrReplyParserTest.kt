@@ -54,6 +54,27 @@ class PnrReplyParserTest {
     }
 
     @Test
+    fun `parse telegram check_pnr_status_bot reply fixture asserting last 4 digits 8777`() {
+        val reply = loadFixture("reply_telegram_bot.txt")
+        val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
+
+        assertEquals("6952208777", result.pnr)
+        assertEquals("8777", result.matchedPnrLast4)
+        assertEquals("RLWL/28", result.extractedStatus)
+        assertEquals(PnrStatusCategory.WAITLISTED, result.category)
+        assertFalse(result.isChartPrepared)
+        assertFalse(result.isCancelled)
+        assertTrue(result.isSuccess)
+        assertTrue(
+            PnrReplyParser.isTelegramPnrBot(
+                packageName = "org.telegram.messenger",
+                senderTitle = "check_pnr_status_bot",
+                bodyText = reply
+            )
+        )
+    }
+
+    @Test
     fun `parse chart prepared fixture asserting last 4 digits 8777`() {
         val reply = loadFixture("reply_chart_prepared.txt")
         val result = PnrReplyParser.parse(reply, pendingPnrLast4 = "8777")
@@ -79,12 +100,20 @@ class PnrReplyParserTest {
     }
 
     @Test
-    fun `other sender fixture is rejected by isSender139`() {
+    fun `other sender fixture is rejected by isSender139 and isTelegramPnrBot`() {
+        val otherBody = loadFixture("reply_other_sender.txt")
         assertFalse(PnrReplyParser.isSender139("VK-BANKOTP"))
         assertFalse(PnrReplyParser.isSender139("Google"))
         assertFalse(PnrReplyParser.isSender139("9876543210"))
         assertFalse(PnrReplyParser.isSender139(null))
         assertFalse(PnrReplyParser.isSender139(""))
+        assertFalse(
+            PnrReplyParser.isTelegramPnrBot(
+                packageName = "org.telegram.messenger",
+                senderTitle = "John Doe",
+                bodyText = otherBody
+            )
+        )
     }
 
     @Test

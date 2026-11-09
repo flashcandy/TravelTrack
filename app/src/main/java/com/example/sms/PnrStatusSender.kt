@@ -1,6 +1,8 @@
 package com.example.sms
 
 import android.Manifest
+import android.content.ClipData
+import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
@@ -14,6 +16,7 @@ import com.example.data.TripRepository
 
 sealed interface PnrCheckDispatchResult {
     data class PrefilledIntent(val intent: Intent, val checkId: Long, val pnr: String) : PnrCheckDispatchResult
+    data class TelegramBotIntent(val intent: Intent, val fallbackIntent: Intent, val checkId: Long, val pnr: String) : PnrCheckDispatchResult
     data class AutoSent(val checkId: Long, val pnr: String) : PnrCheckDispatchResult
     data class Error(val message: String) : PnrCheckDispatchResult
 }
@@ -28,6 +31,7 @@ sealed interface SmsSendResult {
 object PnrStatusSender {
 
     const val DESTINATION_NUMBER = "139"
+    const val TELEGRAM_BOT_USERNAME = "check_pnr_status_bot"
     const val TIMEOUT_MILLIS = 180_000L // 3 minutes
 
     fun validatePnr(pnr: String): Boolean {
@@ -35,7 +39,7 @@ object PnrStatusSender {
     }
 
     /**
-     * Primary method: Prefilled SMS intent requiring ZERO SMS permissions.
+     * Primary SMS method: Prefilled SMS intent requiring ZERO SMS permissions.
      * Uses Intent(Intent.ACTION_SENDTO, Uri.parse("smsto:139")) with putExtra("sms_body", "PNR <10-digit PNR>").
      */
     fun buildPrefilledIntent(pnr: String): Intent {
@@ -47,7 +51,69 @@ object PnrStatusSender {
     }
 
     /**
-     * Dispatches a PNR status check.
+     * Telegram Bot method: Deep-links directly into @check_pnr_status_bot inside Telegram app.
+     */
+    fun buildTelegramBotIntent(botUsername: String = TELEGRAM_BOT_USERNAME): Intent {
+        val cleanBot = botUsername.trim().removePrefix("@").ifBlank { TELEGRAM_BOT_USERNAME }
+        return Intent(Intent.ACTION_VIEW, Uri.parse("tg://resolve?domain=$cleanBot")).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }
+
+    fun buildTelegramWebFallbackIntent(botUsername: String = TELEGRAM_BOT_USERNAME): Intent {
+        val cleanBot = botUsername.trim().removePrefix("@").ifBlank { TELEGRAM_BOT_USERNAME }
+        return Intent(Intent.ACTION_VIEW, Uri.parse("https://t.me/$cleanBot")).apply {
+            flags = Intent.FLAG_ACTIVITY_NEW_TASK
+        }
+    }
+
+    /**
+     * Dispatches a PNR status check via Telegram Bot (@check_pnr_status_bot):
+     * 1. Copies the 10-digit PNR to clipboard for instant 1-tap paste in Telegram.
+     * 2. Saves a PnrStatusCheck record with method "TELEGRAM_BOT".
+     * 3. Returns the deep-link intent to open @check_pnr_status_bot.
+     */
+    suspend fun dispatchTelegramBotCheck(
+        context: Context,
+        trip: Trip,
+        botUsername: String = TELEGRAM_BOT_USERNAME,
+        isManualTrigger: Boolean = true
+    ): PnrCheckDispatchResult {
+        val cleanPnr = trip.cleanPnr()
+        if (cleanPnr.length != 10) {
+            return PnrCheckDispatchResult.Error(
+                "Invalid PNR: PNR must be exactly 10 digits (found: '${trip.reference}')"
+            )
+        }
+
+        // Copy PNR to clipboard so user only has to paste & send in @check_pnr_status_bot
+        runCatching {
+            val clipboard = context.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            clipboard?.setPrimaryClip(ClipData.newPlainText("PNR Number", cleanPnr))
+        }
+
+        val database = AppDatabase.getInstance(context)
+        val repository = TripRepository(database.tripDao(), database.pnrStatusCheckDao())
+
+        val checkId = repository.recordPnrCheckRequest(
+            tripId = trip.id,
+            pnr = cleanPnr,
+            isManual = isManualTrigger,
+            method = "TELEGRAM_BOT"
+        )
+
+        val tgIntent = buildTelegramBotIntent(botUsername)
+        val fallbackIntent = buildTelegramWebFallbackIntent(botUsername)
+        return PnrCheckDispatchResult.TelegramBotIntent(
+            intent = tgIntent,
+            fallbackIntent = fallbackIntent,
+            checkId = checkId,
+            pnr = cleanPnr
+        )
+    }
+
+    /**
+     * Dispatches a PNR status check via 139 SMS.
      * If [autoSendRequested] is true and SEND_SMS permission is granted, sends directly via SmsManager.
      * Otherwise, saves a check record with method "PREFILLED_SMS" and returns the prefilled intent.
      */
@@ -132,10 +198,11 @@ object PnrStatusSender {
         trip: Trip,
         isManualTrigger: Boolean = true
     ): SmsSendResult {
-        when (val res = dispatchCheck(context, trip, autoSendRequested = true, isManualTrigger = isManualTrigger)) {
-            is PnrCheckDispatchResult.AutoSent -> return SmsSendResult.Success(res.checkId, res.pnr)
-            is PnrCheckDispatchResult.PrefilledIntent -> return SmsSendResult.Success(res.checkId, res.pnr)
-            is PnrCheckDispatchResult.Error -> return SmsSendResult.Error(res.message)
+        return when (val res = dispatchCheck(context, trip, autoSendRequested = true, isManualTrigger = isManualTrigger)) {
+            is PnrCheckDispatchResult.AutoSent -> SmsSendResult.Success(res.checkId, res.pnr)
+            is PnrCheckDispatchResult.PrefilledIntent -> SmsSendResult.Success(res.checkId, res.pnr)
+            is PnrCheckDispatchResult.TelegramBotIntent -> SmsSendResult.Success(res.checkId, res.pnr)
+            is PnrCheckDispatchResult.Error -> SmsSendResult.Error(res.message)
         }
     }
 }

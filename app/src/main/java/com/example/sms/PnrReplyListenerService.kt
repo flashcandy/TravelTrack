@@ -19,7 +19,6 @@ import com.example.data.TripRepository
 import com.example.widget.TravelTrackWidgetUpdater
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
-import java.util.Locale
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -70,7 +69,7 @@ class PnrReplyListenerService : NotificationListenerService() {
         val bigText = extras.getCharSequence(Notification.EXTRA_BIG_TEXT)?.toString()?.trim()
         val text = extras.getCharSequence(Notification.EXTRA_TEXT)?.toString()?.trim()
 
-        // Read EXTRA_MESSAGES for messaging-style notifications
+        // Read EXTRA_MESSAGES for messaging-style notifications (Messages & Telegram)
         val messagingStyle = NotificationCompat.MessagingStyle.extractMessagingStyleFromNotification(notification)
         val messagesContent = messagingStyle?.messages?.joinToString("\n") { msg ->
             "${msg.person?.name ?: ""}: ${msg.text}"
@@ -78,10 +77,13 @@ class PnrReplyListenerService : NotificationListenerService() {
 
         val combinedBody = when {
             !bigText.isNullOrBlank() -> bigText
+            !messagesContent.isNullOrBlank() && (text == null || messagesContent.length > text.length) -> messagesContent
             !text.isNullOrBlank() -> text
             !messagesContent.isNullOrBlank() -> messagesContent
             else -> ""
         }.trim()
+
+        if (combinedBody.isEmpty()) return
 
         val candidateSender = when {
             PnrReplyParser.isSender139(title) -> title
@@ -91,36 +93,36 @@ class PnrReplyListenerService : NotificationListenerService() {
             else -> null
         }
 
-        // 3. Only process if the title or sender identifies 139 (or the text contains explicit 139 railway inquiry header)
+        // 3. Process if sender identifies 139 OR Telegram @check_pnr_status_bot
         val isFrom139 = candidateSender != null ||
             PnrReplyParser.isSender139(title) ||
             (title.contains("139") && !title.contains("1390"))
 
-        if (!isFrom139) {
-            // Strictly ignore all non-139 notifications immediately without persisting any text
+        val conversationTitle = messagingStyle?.conversationTitle?.toString() ?: title
+        val isFromTelegramBot = PnrReplyParser.isTelegramPnrBot(
+            packageName = sbn.packageName,
+            senderTitle = conversationTitle,
+            bodyText = combinedBody
+        )
+
+        if (!isFrom139 && !isFromTelegramBot) {
+            // Strictly ignore all non-139 and non-PNR-bot notifications immediately without persisting any text
             return
         }
 
-        if (combinedBody.isEmpty()) return
-
-        // 4. Asynchronously process the notification against active pending checks
+        // 4. Asynchronously process the notification against active pending checks or matching saved trips
         serviceScope.launch {
-            handle139Notification(combinedBody)
+            handlePnrReplyNotification(combinedBody, isFromTelegramBot = isFromTelegramBot)
         }
     }
 
-    private suspend fun handle139Notification(body: String) {
+    private suspend fun handlePnrReplyNotification(body: String, isFromTelegramBot: Boolean) {
         val database = AppDatabase.getInstance(applicationContext)
         val repository = TripRepository(database.tripDao(), database.pnrStatusCheckDao())
 
-        // 5. Only process if a PNR check is pending from the last 3 minutes
+        // 5. Look up active pending checks from the last 3 minutes
         val pendingChecks = repository.getPendingChecks(maxAgeMillis = 180_000L)
-        if (pendingChecks.isEmpty()) {
-            // No active pending check in last 3 minutes — discard notification immediately
-            return
-        }
 
-        // Check if any pending check matches full PNR or last 4 digits
         var matchedCheck: com.example.data.PnrStatusCheck? = null
         var matchedResult: PnrParseResult? = null
 
@@ -134,14 +136,29 @@ class PnrReplyListenerService : NotificationListenerService() {
             }
         }
 
-        if (matchedCheck == null || matchedResult == null) {
-            // Discard: notification text does not match any pending check
-            return
+        // 6. If no pending check was initiated in the last 3 minutes, but @check_pnr_status_bot
+        // pushed an automatic update containing a 10-digit PNR that matches a saved train trip in Room,
+        // process it automatically so background Telegram bot alerts update the trip & widget!
+        var trip: Trip? = null
+        if (matchedCheck != null && matchedResult != null) {
+            trip = repository.getTripById(matchedCheck.tripId)
+                ?: repository.getTripByPnr(matchedCheck.pnr)
+        } else if (isFromTelegramBot) {
+            val directParse = PnrReplyParser.parse(body)
+            val fullPnr = directParse.pnr
+            if (fullPnr != null) {
+                val matchingTrip = repository.getTripByPnr(fullPnr)
+                if (matchingTrip != null) {
+                    trip = matchingTrip
+                    matchedResult = directParse
+                }
+            }
         }
 
-        val trip = repository.getTripById(matchedCheck.tripId)
-            ?: repository.getTripByPnr(matchedCheck.pnr)
-            ?: return
+        if (trip == null || matchedResult == null) {
+            // Discard: notification does not match any pending check or saved PNR
+            return
+        }
 
         val isoNow = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
 
@@ -150,15 +167,32 @@ class PnrReplyListenerService : NotificationListenerService() {
             val newCategory = matchedResult.category
             val newStatusString = matchedResult.extractedStatus
 
-            // Update trip current status and mark check completed
-            repository.updateTripPnrStatus(
-                tripId = trip.id,
-                newStatus = newStatusString,
-                checkedAtIso = isoNow,
-                rawReply = body,
-                checkId = matchedCheck.id,
-                success = true
-            )
+            // Update trip current status and mark check completed (or log unsolicited Telegram bot update)
+            if (matchedCheck != null) {
+                repository.updateTripPnrStatus(
+                    tripId = trip.id,
+                    newStatus = newStatusString,
+                    checkedAtIso = isoNow,
+                    rawReply = body,
+                    checkId = matchedCheck.id,
+                    success = true
+                )
+            } else {
+                val autoCheckId = repository.recordPnrCheckRequest(
+                    tripId = trip.id,
+                    pnr = trip.cleanPnr(),
+                    isManual = false,
+                    method = "TELEGRAM_BOT"
+                )
+                repository.updateTripPnrStatus(
+                    tripId = trip.id,
+                    newStatus = newStatusString,
+                    checkedAtIso = isoNow,
+                    rawReply = body,
+                    checkId = autoCheckId,
+                    success = true
+                )
+            }
 
             // Refresh home screen widget immediately
             TravelTrackWidgetUpdater.updateAllWidgets(applicationContext)
@@ -175,8 +209,8 @@ class PnrReplyListenerService : NotificationListenerService() {
                     newStatus = newStatusString
                 )
             }
-        } else {
-            // If parsing status fails, keep existing status, save raw reply for user review
+        } else if (matchedCheck != null) {
+            // If parsing status fails on a pending check, keep existing status and save raw reply for user review
             repository.updateTripPnrStatus(
                 tripId = trip.id,
                 newStatus = trip.effectiveStatus,

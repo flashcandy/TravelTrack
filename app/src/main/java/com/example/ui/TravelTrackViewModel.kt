@@ -230,12 +230,54 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
                     }
                     startPnrTimeoutCountdown(trip.id)
                 }
+                is PnrCheckDispatchResult.TelegramBotIntent -> {
+                    startPnrTimeoutCountdown(trip.id)
+                }
                 is PnrCheckDispatchResult.Error -> {
                     _statusBannerMessage.value = "SMS DISPATCH FAILED: ${dispatchResult.message}"
                 }
             }
         }
     }
+
+    fun checkPnrStatusViaTelegramBot(trip: Trip) {
+        viewModelScope.launch {
+            val pnrDigits = trip.cleanPnr()
+            if (pnrDigits.length != 10) {
+                _statusBannerMessage.value = "ERROR: PNR must be 10 digits (found: '${trip.reference}')"
+                return@launch
+            }
+
+            val dispatchResult = PnrStatusSender.dispatchTelegramBotCheck(
+                context = getApplication(),
+                trip = trip,
+                isManualTrigger = true
+            )
+
+            when (dispatchResult) {
+                is PnrCheckDispatchResult.TelegramBotIntent -> {
+                    _statusBannerMessage.value = "PNR COPIED // PASTE & SEND TO @check_pnr_status_bot"
+                    val app = getApplication<Application>()
+                    val opened = runCatching {
+                        app.startActivity(dispatchResult.intent)
+                        true
+                    }.getOrDefault(false)
+
+                    if (!opened) {
+                        runCatching {
+                            app.startActivity(dispatchResult.fallbackIntent)
+                        }
+                    }
+                    startPnrTimeoutCountdown(trip.id)
+                }
+                is PnrCheckDispatchResult.Error -> {
+                    _statusBannerMessage.value = "TELEGRAM DISPATCH FAILED: ${dispatchResult.message}"
+                }
+                else -> {}
+            }
+        }
+    }
+
 
     private fun startPnrTimeoutCountdown(tripId: Long) {
         pnrTimeoutJob?.cancel()

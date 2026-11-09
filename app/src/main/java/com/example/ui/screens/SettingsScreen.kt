@@ -340,7 +340,7 @@ fun SettingsScreen(
                                 tint = NothingRed
                             )
                             Text(
-                                text = "139 PNR STATUS CHECKER",
+                                text = "139 SMS & TELEGRAM BOT CHECKER",
                                 fontFamily = DotoFontFamily,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 15.sp,
@@ -350,7 +350,7 @@ fun SettingsScreen(
 
                         Spacer(modifier = Modifier.height(6.dp))
                         Text(
-                            text = "Sends 'PNR <PNR>' to Indian Railways 139 service. The app automatically reads replies posted by your Messages app via Notification Listener Service. Strictly offline.",
+                            text = "Check live PNR status via Indian Railways 139 SMS or @check_pnr_status_bot on Telegram. TravelTrack automatically reads replies from your notifications 100% offline.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -402,9 +402,9 @@ fun SettingsScreen(
 
                                 Text(
                                     text = if (isNotificationAccessGranted) {
-                                        "Access granted. TravelTrack reads incoming 139 notifications and updates your ticket status automatically."
+                                        "Access granted. TravelTrack reads incoming 139 SMS and @check_pnr_status_bot Telegram notifications and updates your ticket status automatically."
                                     } else {
-                                        "Required to read 139 replies automatically from your messaging app notification without requesting SMS read permissions."
+                                        "Required to read 139 SMS and @check_pnr_status_bot Telegram replies automatically from your notifications without API keys or SMS read permissions."
                                     },
                                     style = MaterialTheme.typography.bodySmall,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
