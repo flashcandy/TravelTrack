@@ -113,6 +113,15 @@ class MainActivity : ComponentActivity() {
         viewModel.refreshNotificationAccessStatus()
     }
 
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus) {
+            // Android 10+ allows clipboard reading only after the window has gained focus.
+            // Auto-detects copied @check_pnr_status_bot or 139 replies when returning from Telegram/Messages.
+            viewModel.checkClipboardForPnrReply(showNoMatchFeedback = false)
+        }
+    }
+
     override fun onNewIntent(intent: Intent) {
         super.onNewIntent(intent)
         setIntent(intent)
@@ -220,6 +229,7 @@ fun TravelTrackAppContent(
                     onDeleteTrip = { viewModel.deleteTrip(it) },
                     onCheckPnrStatus = { viewModel.checkPnrStatusViaSms(it) },
                     onCheckTelegramBot = { viewModel.checkPnrStatusViaTelegramBot(it) },
+                    onCheckClipboard = { viewModel.checkClipboardForPnrReply(showNoMatchFeedback = true) },
                     onCancelPendingCheck = { viewModel.cancelPendingPnrCheck() },
                     onUpdateStatusManually = { tripId, status -> viewModel.updateStatusManually(tripId, status) }
                 )

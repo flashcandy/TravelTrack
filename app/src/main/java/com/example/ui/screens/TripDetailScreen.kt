@@ -77,6 +77,7 @@ fun TripDetailScreen(
     onDeleteTrip: (Trip) -> Unit,
     onCheckPnrStatus: (Trip) -> Unit,
     onCheckTelegramBot: (Trip) -> Unit = {},
+    onCheckClipboard: () -> Unit = {},
     onCancelPendingCheck: () -> Unit,
     onUpdateStatusManually: (Long, String) -> Unit,
     modifier: Modifier = Modifier
@@ -283,7 +284,7 @@ fun TripDetailScreen(
                         }
                     }
 
-                    // 2. LIVE PNR CHECKING: 139 SMS & Telegram Bot (@check_pnr_status_bot)
+                    // 2. LIVE PNR CHECKING: 139 SMS & Telegram Bot (@check_pnr_status_bot) + Auto-Clipboard
                     val canCheckPnr = trip.isPnrCheckEligible(allowConfirmed = showCheckForConfirmed)
                     if (canCheckPnr) {
                         item {
@@ -291,53 +292,74 @@ fun TripDetailScreen(
                                 borderColor = if (isPnrCheckPending) NothingRed else MaterialTheme.colorScheme.outline
                             ) {
                                 if (isPnrCheckPending) {
-                                    Row(
+                                    Column(
                                         modifier = Modifier.fillMaxWidth(),
-                                        verticalAlignment = Alignment.CenterVertically,
-                                        horizontalArrangement = Arrangement.SpaceBetween
+                                        verticalArrangement = Arrangement.spacedBy(10.dp)
                                     ) {
                                         Row(
+                                            modifier = Modifier.fillMaxWidth(),
                                             verticalAlignment = Alignment.CenterVertically,
-                                            horizontalArrangement = Arrangement.spacedBy(12.dp),
-                                            modifier = Modifier.weight(1f)
+                                            horizontalArrangement = Arrangement.SpaceBetween
                                         ) {
-                                            CircularProgressIndicator(
-                                                color = NothingRed,
-                                                strokeWidth = 2.dp,
-                                                modifier = Modifier.size(24.dp)
-                                            )
-                                            Column {
-                                                Text(
-                                                    text = "WAITING FOR PNR REPLY...",
-                                                    fontFamily = DotoFontFamily,
-                                                    fontWeight = FontWeight.Bold,
-                                                    fontSize = 14.sp,
-                                                    color = MaterialTheme.colorScheme.onSurface
+                                            Row(
+                                                verticalAlignment = Alignment.CenterVertically,
+                                                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                                                modifier = Modifier.weight(1f)
+                                            ) {
+                                                CircularProgressIndicator(
+                                                    color = NothingRed,
+                                                    strokeWidth = 2.dp,
+                                                    modifier = Modifier.size(24.dp)
                                                 )
-                                                val mins = pendingPnrSecondsRemaining / 60
-                                                val secs = pendingPnrSecondsRemaining % 60
-                                                Text(
-                                                    text = String.format(
-                                                        "Timeout in %02d:%02d · listening for 139 SMS or @check_pnr_status_bot",
-                                                        mins,
-                                                        secs
-                                                    ),
-                                                    style = MaterialTheme.typography.bodySmall,
-                                                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                                                )
+                                                Column {
+                                                    Text(
+                                                        text = "WAITING FOR PNR REPLY...",
+                                                        fontFamily = DotoFontFamily,
+                                                        fontWeight = FontWeight.Bold,
+                                                        fontSize = 14.sp,
+                                                        color = MaterialTheme.colorScheme.onSurface
+                                                    )
+                                                    val mins = pendingPnrSecondsRemaining / 60
+                                                    val secs = pendingPnrSecondsRemaining % 60
+                                                    Text(
+                                                        text = String.format(
+                                                            "Timeout in %02d:%02d · Copy bot reply & return here (auto-detects clipboard!)",
+                                                            mins,
+                                                            secs
+                                                        ),
+                                                        style = MaterialTheme.typography.bodySmall,
+                                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                                    )
+                                                }
                                             }
+
+                                            Text(
+                                                text = "[CANCEL]",
+                                                fontFamily = DotoFontFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = NothingRed,
+                                                modifier = Modifier
+                                                    .clickable(onClick = onCancelPendingCheck)
+                                                    .padding(8.dp)
+                                            )
                                         }
 
-                                        Text(
-                                            text = "[CANCEL]",
-                                            fontFamily = DotoFontFamily,
-                                            fontWeight = FontWeight.Bold,
-                                            fontSize = 11.sp,
-                                            color = NothingRed,
+                                        OutlinedButton(
+                                            onClick = onCheckClipboard,
+                                            shape = RoundedCornerShape(10.dp),
                                             modifier = Modifier
-                                                .clickable(onClick = onCancelPendingCheck)
-                                                .padding(8.dp)
-                                        )
+                                                .fillMaxWidth()
+                                                .testTag("paste_from_clipboard_pending_button")
+                                        ) {
+                                            Text(
+                                                text = "READ COPIED BOT / 139 REPLY FROM CLIPBOARD NOW",
+                                                fontFamily = DotoFontFamily,
+                                                fontWeight = FontWeight.Bold,
+                                                fontSize = 11.sp,
+                                                color = NothingRed
+                                            )
+                                        }
                                     }
                                 } else {
                                     Column(
@@ -410,7 +432,7 @@ fun TripDetailScreen(
                                                     color = MaterialTheme.colorScheme.onSurface
                                                 )
                                                 Text(
-                                                    text = "Copies PNR & opens @check_pnr_status_bot. Bot reply notification updates status automatically.",
+                                                    text = "1. Tap button (copies PNR & opens bot)\n2. Paste & send PNR in Telegram\n3. Copy bot's reply & switch back here — status updates automatically!",
                                                     style = MaterialTheme.typography.bodySmall,
                                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                                 )
@@ -687,17 +709,35 @@ fun TripDetailScreen(
                                     maxLines = 1,
                                     overflow = TextOverflow.Ellipsis
                                 )
-                                Text(
-                                    text = "[UPDATE MANUALLY]",
-                                    fontFamily = DotoFontFamily,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 11.sp,
-                                    color = NothingRed,
-                                    modifier = Modifier
-                                        .clickable { showManualUpdateDialog = true }
-                                        .padding(4.dp)
-                                        .testTag("update_status_manually_button")
-                                )
+                                Row(
+                                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    if (trip.type == TripType.TRAIN) {
+                                        Text(
+                                            text = "[PASTE BOT REPLY]",
+                                            fontFamily = DotoFontFamily,
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSurface,
+                                            modifier = Modifier
+                                                .clickable { onCheckClipboard() }
+                                                .padding(4.dp)
+                                                .testTag("paste_bot_reply_button")
+                                        )
+                                    }
+                                    Text(
+                                        text = "[UPDATE MANUALLY]",
+                                        fontFamily = DotoFontFamily,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 11.sp,
+                                        color = NothingRed,
+                                        modifier = Modifier
+                                            .clickable { showManualUpdateDialog = true }
+                                            .padding(4.dp)
+                                            .testTag("update_status_manually_button")
+                                    )
+                                }
                             }
 
                             Spacer(modifier = Modifier.height(12.dp))

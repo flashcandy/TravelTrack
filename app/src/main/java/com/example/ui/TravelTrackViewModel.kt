@@ -1,6 +1,8 @@
 package com.example.ui
 
 import android.app.Application
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import androidx.lifecycle.AndroidViewModel
@@ -23,12 +25,14 @@ import com.example.parser.TicketFormat
 import com.example.parser.TicketParserRouter
 import com.example.sms.PnrCheckDispatchResult
 import com.example.sms.PnrReplyListenerService
+import com.example.sms.PnrReplyParser
 import com.example.sms.PnrStatusScheduler
 import com.example.sms.PnrStatusSender
 import com.example.sms.SmsSendResult
 import com.example.widget.TravelTrackWidgetUpdater
 import com.example.widget.WidgetRefreshScheduler
 import java.time.LocalDateTime
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.Flow
@@ -90,6 +94,7 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
     private val _showSmsPermissionRationale = MutableStateFlow(false)
     private val _isNotificationAccessGranted = MutableStateFlow(false)
     private var pnrTimeoutJob: Job? = null
+    private var lastProcessedClipboardHash: Int = 0
 
     val uiState: StateFlow<HomeTripsUiState> = combine(
         tripRepository.allTrips,
@@ -308,6 +313,128 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
         _pendingPnrSecondsRemaining.value = 0
     }
 
+    /**
+     * Auto-Clipboard Detection:
+     * When the user copies a reply in @check_pnr_status_bot (or 139 SMS) and returns to TravelTrack,
+     * this reads the clipboard, matches the 10-digit PNR or active pending check, and updates the trip
+     * status + Glance widget automatically without requiring manual paste.
+     */
+    fun checkClipboardForPnrReply(showNoMatchFeedback: Boolean = false) {
+        viewModelScope.launch {
+            val app = getApplication<Application>()
+            val clipboard = app.getSystemService(Context.CLIPBOARD_SERVICE) as? ClipboardManager
+            val clipText = clipboard?.primaryClip
+                ?.getItemAt(0)
+                ?.coerceToText(app)
+                ?.toString()
+                ?.trim()
+                .orEmpty()
+
+            if (clipText.length < 12) {
+                // Ignore if clipboard only has the 10-digit PNR we copied ourselves or is empty
+                if (showNoMatchFeedback) {
+                    _statusBannerMessage.value = "CLIPBOARD EMPTY OR NO PNR REPLY FOUND"
+                }
+                return@launch
+            }
+
+            val clipHash = clipText.hashCode()
+            if (!showNoMatchFeedback && clipHash == lastProcessedClipboardHash) {
+                return@launch
+            }
+
+            val updated = tryApplyPnrReplyText(
+                rawText = clipText,
+                sourceMethod = "CLIPBOARD_AUTO",
+                navigateToTripOnMatch = false
+            )
+            if (updated) {
+                lastProcessedClipboardHash = clipHash
+            } else if (showNoMatchFeedback) {
+                _statusBannerMessage.value = "NO MATCHING PNR STATUS FOUND IN CLIPBOARD"
+            }
+        }
+    }
+
+    /**
+     * Processes a PNR reply text from Share sheet ("Share -> TravelTrack" in Telegram) or clipboard.
+     * Returns true if it matched a saved train trip and updated its live status.
+     */
+    suspend fun tryApplyPnrReplyText(
+        rawText: String,
+        sourceMethod: String = "TELEGRAM_SHARE",
+        navigateToTripOnMatch: Boolean = true
+    ): Boolean {
+        val trimmed = rawText.trim()
+        if (trimmed.length < 12) return false
+
+        // 1. Check active pending trip first
+        val pendingTripId = _pendingPnrTripId.value
+        val pendingTrip = if (pendingTripId != null) tripRepository.getTripById(pendingTripId) else null
+
+        val directParsed = PnrReplyParser.parse(
+            smsBody = trimmed,
+            pendingPnrLast4 = pendingTrip?.cleanPnr()?.takeLast(4)
+        )
+
+        if (!directParsed.isSuccess || directParsed.extractedStatus == null) {
+            return false
+        }
+
+        // 2. Find matching trip by 10-digit PNR in text, or fall back to active pending trip
+        val matchedTrip: Trip = when {
+            directParsed.pnr != null -> {
+                tripRepository.getTripByPnr(directParsed.pnr) ?: pendingTrip ?: return false
+            }
+            pendingTrip != null && directParsed.matchedPnrLast4 == pendingTrip.cleanPnr().takeLast(4) -> {
+                pendingTrip
+            }
+            else -> return false
+        }
+
+        val newStatus = directParsed.extractedStatus
+        val isoNow = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyy-MM-dd'T'HH:mm"))
+
+        // If status and raw reply are already identical to what's stored and no check is pending, skip duplicate banner
+        if (matchedTrip.currentStatus == newStatus &&
+            matchedTrip.lastRawSmsReply == trimmed &&
+            _pendingPnrTripId.value != matchedTrip.id
+        ) {
+            return false
+        }
+
+        val latestCheck = tripRepository.getLatestCheckForTrip(matchedTrip.id)
+        val checkIdToUpdate = if (latestCheck != null && latestCheck.replyReceivedAt == null) {
+            latestCheck.id
+        } else {
+            tripRepository.recordPnrCheckRequest(
+                tripId = matchedTrip.id,
+                pnr = matchedTrip.cleanPnr(),
+                isManual = true,
+                method = sourceMethod
+            )
+        }
+
+        tripRepository.updateTripPnrStatus(
+            tripId = matchedTrip.id,
+            newStatus = newStatus,
+            checkedAtIso = isoNow,
+            rawReply = trimmed,
+            checkId = checkIdToUpdate,
+            success = true
+        )
+
+        cancelPendingPnrCheck()
+        TravelTrackWidgetUpdater.updateAllWidgets(getApplication())
+
+        _statusBannerMessage.value = "PNR ••••${matchedTrip.maskedReferenceLast4()} UPDATED // $newStatus"
+
+        if (navigateToTripOnMatch) {
+            openTripDetailFromIntent(matchedTrip.id)
+        }
+        return true
+    }
+
     fun updateStatusManually(tripId: Long, exactStatus: String) {
         viewModelScope.launch {
             val cleaned = exactStatus.trim()
@@ -358,6 +485,19 @@ class TravelTrackViewModel(application: Application) : AndroidViewModel(applicat
 
     fun processRawTicketText(rawText: String, sourceLabel: String = "sample://ticket") {
         viewModelScope.launch {
+            // If shared text is a PNR status reply (e.g. shared from @check_pnr_status_bot or 139 SMS)
+            // and matches an existing trip, update its status directly!
+            if (sourceLabel == "share://text") {
+                val appliedAsPnrUpdate = tryApplyPnrReplyText(
+                    rawText = rawText,
+                    sourceMethod = "TELEGRAM_SHARE",
+                    navigateToTripOnMatch = true
+                )
+                if (appliedAsPnrUpdate) {
+                    return@launch
+                }
+            }
+
             _isExtracting.value = true
             _extractionMessage.value = "PARSING TICKET LABELS..."
             try {
